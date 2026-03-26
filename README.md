@@ -1,2 +1,2 @@
 # IM-system
-用go开发的即时通信系统
+基于golang的即时通信系统
