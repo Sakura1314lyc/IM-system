@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"strings"
 	"sync"
 )
 
@@ -36,12 +37,16 @@ func (this *Server) ListenMessager() {
 	for {
 		msg := <-this.Message
 
-		//将msg发送给全都的在线User
-		this.mapLock.Lock()
+		//将msg发送给全部在线User
+		this.mapLock.RLock()
 		for _, cli := range this.OnlineMap {
-			cli.C <- msg
+			select {
+			case cli.C <- msg:
+			default:
+				// 避免阻塞，若用户管道满则略过
+			}
 		}
-		this.mapLock.Unlock()
+		this.mapLock.RUnlock()
 	}
 }
 
@@ -65,20 +70,24 @@ func (this *Server) Handler(conn net.Conn) {
 		buf := make([]byte, 4096)
 		for {
 			n, err := conn.Read(buf)
-			if n == 0 {
+			if n == 0 || err == io.EOF {
 				user.Offline() //用户下线
 				return
 			}
 
-			if err != nil && err != io.EOF {
+			if err != nil {
 				fmt.Println("Conn Read err:", err)
+				user.Offline()
 				return
 			}
 
-			//提取用户的消息(去除回车)
-			msg := string(buf[:n-1])
+			// 提取用户的消息并去除首尾空白
+			msg := strings.TrimSpace(string(buf[:n]))
+			if msg == "" {
+				continue
+			}
 
-			//将得到的数据进行处理
+			// 将得到的数据进行处理
 			user.DoMessage(msg)
 		}
 	}()
