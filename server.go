@@ -6,6 +6,7 @@ import (
 	"net"
 	"strings"
 	"sync"
+	"time"
 )
 
 type Server struct {
@@ -36,6 +37,7 @@ func Newserver(ip string, port int) *Server {
 func (this *Server) ListenMessager() {
 	for {
 		msg := <-this.Message
+		fmt.Printf("[%s] 广播消息: %s\n", time.Now().Format("2006-01-02 15:04:05"), msg)
 
 		//将msg发送给全部在线User
 		this.mapLock.RLock()
@@ -44,6 +46,7 @@ func (this *Server) ListenMessager() {
 			case cli.C <- msg:
 			default:
 				// 避免阻塞，若用户管道满则略过
+				fmt.Printf("[%s] 用户 %s 消息队列满，已跳过\n", time.Now().Format("2006-01-02 15:04:05"), cli.Name)
 			}
 		}
 		this.mapLock.RUnlock()
@@ -53,7 +56,7 @@ func (this *Server) ListenMessager() {
 // 广播消息的方法
 func (this *Server) BroadCast(user *User, msg string) {
 	sendMsg := "[" + user.Addr + "]" + user.Name + ":" + msg
-
+	fmt.Printf("[%s] Broadcast from %s(%s): %s\n", time.Now().Format("2006-01-02 15:04:05"), user.Name, user.Addr, msg)
 	this.Message <- sendMsg
 }
 
@@ -64,6 +67,9 @@ func (this *Server) Handler(conn net.Conn) {
 	user := NewUser(conn, this) // 创建用户
 
 	user.Online() // 用户上线
+
+	//监听是否活跃的channel
+	isLive := make(chan bool)
 
 	//接收客户端发送的消息
 	go func() {
@@ -89,11 +95,30 @@ func (this *Server) Handler(conn net.Conn) {
 
 			// 将得到的数据进行处理
 			user.DoMessage(msg)
+
+			//用户的任意消息，代表当前用户是一个活跃的
+			isLive <- true
 		}
 	}()
 
 	//当前handler阻塞
-	select {}
+	for {
+		select {
+		case <-isLive:
+			//说明当前用户时活跃的，应该重置定时器
+			//不做任何事情，为了激活select，更新定时器
+		case <-time.After(time.Minute * 10):
+			//说明超时
+			//将当前的User强制关闭
+
+			fmt.Printf("[%s] 用户 %s 超时未活动，被踢出\n", time.Now().Format("2006-01-02 15:04:05"), user.Name)
+			user.SendMsg("你已被踢出")
+			user.Offline()
+			return
+			// 也可以用 runtime.Goexit(), 但 return 更直观
+
+		}
+	}
 }
 
 // 启动服务器的接口
