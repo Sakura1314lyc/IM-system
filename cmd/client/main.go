@@ -25,7 +25,7 @@ func NewClient(serverip string, serverport int) *Client {
 	}
 
 	//链接server
-	conn, err := net.Dial("tcp", fmt.Sprintf("%s : %d", serverip, serverport))
+	conn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", serverip, serverport))
 	if err != nil {
 		fmt.Println("net.Dial error", err)
 		return nil
@@ -108,7 +108,7 @@ func (client *Client) Privatechat() {
 			//消息不为空则发送
 			if len(ChatMsg) != 0 {
 
-				sendMsg := "to|" + RemoteName + "|" + ChatMsg + "\n\n"
+				sendMsg := "to|" + RemoteName + "|" + ChatMsg + "\n"
 				_, err := client.conn.Write([]byte(sendMsg))
 				if err != nil {
 					fmt.Println("conn Write err:", err)
