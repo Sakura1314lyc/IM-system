@@ -3,7 +3,9 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"net"
+	"os"
 )
 
 type Client struct {
@@ -52,6 +54,99 @@ func (client *Client) menu() bool {
 		return false
 	}
 }
+
+func (client *Client) PublicChat() {
+	//提示用户输入消息
+	var chatMsg string
+	fmt.Println(">>>>>输入聊天内容, exit退出.")
+	fmt.Scanln(&chatMsg)
+
+	for chatMsg != "exit" {
+		//发给服务器
+
+		//消息不为空则发送
+		if len(chatMsg) != 0 {
+			sendMsg := chatMsg + "\n"
+			_, err := client.conn.Write([]byte(sendMsg))
+			if err != nil {
+				fmt.Println("conn Write err :", err)
+				break
+			}
+		}
+
+		chatMsg = ""
+		fmt.Println(">>>>>请输入聊天内容,exit退出.")
+		fmt.Scanln(&chatMsg)
+	}
+
+}
+
+// 查询在线用户
+func (client *Client) SearchUsers() {
+	sendMsg := "who\n"
+	_, err := client.conn.Write([]byte(sendMsg))
+	if err != nil {
+		fmt.Println("conn Write err:", err)
+		return
+	}
+}
+
+// 私聊模式
+func (client *Client) Privatechat() {
+	var RemoteName string
+	var ChatMsg string
+
+	client.SearchUsers()
+	fmt.Println(">>>>>请输入聊天对象[用户名], exit退出.")
+	fmt.Scanln(&RemoteName)
+
+	for RemoteName != "exit" {
+		fmt.Println(">>>>>请输入消息内容,exit退出:")
+		fmt.Scanln(&ChatMsg)
+
+		for ChatMsg != "exit" {
+			//消息不为空则发送
+			if len(ChatMsg) != 0 {
+
+				sendMsg := "to|" + RemoteName + "|" + ChatMsg + "\n\n"
+				_, err := client.conn.Write([]byte(sendMsg))
+				if err != nil {
+					fmt.Println("conn Write err:", err)
+					break
+				}
+			}
+
+			ChatMsg = ""
+			fmt.Println(">>>>>请输入消息内容,exit退出:")
+			fmt.Scanln(&ChatMsg)
+		}
+
+		client.SearchUsers()
+		fmt.Println(">>>>>请输入聊天对象[用户名], exit退出.")
+		fmt.Scanln(&RemoteName)
+
+	}
+}
+
+func (client *Client) UpdateName() bool {
+
+	fmt.Println(">>>>>请输入用户名:")
+	fmt.Scanln(&client.Name)
+
+	sendMsg := "rename|" + client.Name + "\n"
+	_, err := client.conn.Write([]byte(sendMsg))
+	if err != nil {
+		fmt.Println("conn.Write err:", err)
+		return false
+	}
+	return true
+}
+
+// 处理server回应的消息，直接显示到标准输出即可
+func (client *Client) DealResponse() {
+	//一旦client.conn 有数据，就直接copy到stdout标准输出上，永久阻塞监听
+	io.Copy(os.Stdout, client.conn)
+}
 func (client *Client) Run() {
 	for client.flag != 0 {
 		for client.menu() != true {
@@ -62,13 +157,13 @@ func (client *Client) Run() {
 		switch client.flag {
 		case 1:
 			//公聊模式
-			fmt.Println("进入公聊模式...")
+			client.PublicChat()
 		case 2:
 			//私聊模式
-			fmt.Println("进入私聊模式...")
+			client.Privatechat()
 		case 3:
 			//更新用户名
-			fmt.Println("更新用户名...")
+			client.UpdateName()
 			//go的switch默认break
 		}
 	}
@@ -92,6 +187,9 @@ func main() {
 		fmt.Println(">>>>>连接服务器失败...")
 		return
 	}
+
+	//单独开启一个goroutine处理server的回执消息
+	go client.DealResponse()
 
 	fmt.Println(">>>>>连接服务器成功...")
 
