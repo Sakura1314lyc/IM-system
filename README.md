@@ -11,7 +11,7 @@
 - `main.go`：服务端启动入口。
 - `server.go`：服务端核心逻辑（监听连接、转发广播、超时踢出）。
 - `user.go`：用户模型与命令处理（`who` / `rename|` / `to|`）。
-- `cmd/client/main.go`：命令行客户端（公聊、私聊、改名）。
+- `client.go`：命令行客户端（公聊、私聊、改名）。
 
 ## 功能清单（与当前代码一致）
 
@@ -50,7 +50,7 @@ go run main.go server.go user.go
 新开一个终端窗口：
 
 ```bash
-go run ./cmd/client -ip 127.0.0.1 -port 8888
+go run client.go -ip 127.0.0.1 -port 8888
 ```
 
 可再开多个终端重复执行上面命令，模拟多个用户在线。
