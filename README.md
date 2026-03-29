@@ -13,7 +13,7 @@
 - `user.go`：用户模型与命令处理（`who` / `rename|` / `to|`）。
 - `client.go`：命令行客户端（公聊、私聊、改名）。
 
-## 功能清单（与当前代码一致）
+## 功能清单
 
 - ✅ TCP 长连接聊天（非 WebSocket）。
 - ✅ 在线用户上线/下线广播。
@@ -113,39 +113,44 @@ to|alice|你好
 - [ ] 完善单元测试与集成测试。
 
 
-## Web UI 原型
+## Web UI（已接入后端）
 
-为了便于你快速演示产品形态，仓库新增了一个静态前端原型（未直接连接 TCP 服务端）：
+前端通过一个 **HTTP 网关（长轮询）** 联通现有 TCP IM 服务：
 
-- `web/index.html`：页面结构（侧边栏 + 聊天面板 + 输入区）
-- `web/styles.css`：现代化卡片式布局与响应式样式
-- `web/app.js`：基础交互（公聊/私聊切换、发送消息回显）
+- `cmd/web/main.go`：提供静态页面 + `/api/*` 网关（connect/send/poll/close），把浏览器消息转发到 TCP 服务端。
+- `web/index.html`：重构后的聊天界面。
+- `web/styles.css`：深色现代风格与响应式布局。
+- `web/app.js`：真实交互（连接、改名、who 刷新、公聊、私聊）。
 
-### 本地预览
+### 启动步骤
 
-你可以任选一种方式预览：
+1）启动 TCP 聊天服务：
 
 ```bash
-# 方式 1：直接用浏览器打开
-open web/index.html
-
-# 方式 2：启动一个静态文件服务（推荐）
-python3 -m http.server 8080
-# 然后访问 http://127.0.0.1:8080/web/
+go run main.go server.go user.go
 ```
 
-> 说明：当前 UI 是“高保真原型”，后续如需接入实时通信，可增加 WebSocket 网关，转发到现有 TCP IM 服务。
+2）新开终端，启动 Web 网关（默认监听 `:8080`，转发到 `127.0.0.1:8888`）：
 
+```bash
+go run ./cmd/web -listen :8080 -tcp 127.0.0.1:8888
+```
+
+3）浏览器打开：
+
+```text
+http://127.0.0.1:8080/
+```
 
 ### 截图说明（browser_container 不可用时）
 
 如果你的 Agent 运行环境没有提供 `browser_container` 工具（例如仅有 shell），可以用以下方式替代：
 
-1. 本地直接访问 `http://127.0.0.1:8080/web/`（先执行 `python3 -m http.server 8080`）。
+1. 本地直接访问 `http://127.0.0.1:8080/`。
 2. 使用系统截图工具手动截取页面。
 3. 如果仓库已安装 Playwright/Puppeteer，可写自动化脚本产出截图；若未安装，不建议在受限环境中临时安装。
 
-> 结论：`browser_container` 不是项目内配置项，而是平台提供的能力；项目侧无法“开启”它，只能在支持该工具的平台会话中使用。
+> `browser_container` 不是项目内配置项，而是平台提供的能力；项目侧无法“开启”它。
 
 ## 测试
 

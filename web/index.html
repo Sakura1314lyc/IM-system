@@ -3,71 +3,64 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>IM System Web UI</title>
+  <title>IM System Web</title>
   <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
-  <div class="app">
-    <aside class="sidebar">
-      <div class="brand">
+  <div class="layout">
+    <aside class="left">
+      <div class="brand card">
         <h1>IM System</h1>
-        <p>轻量即时通信</p>
+        <p id="statusText">状态：未连接</p>
       </div>
 
-      <section class="profile card">
-        <label for="username">昵称</label>
+      <div class="card block">
+        <h3>连接设置</h3>
+        <label>网关地址</label>
+        <input id="wsInput" value="http://127.0.0.1:8080" />
+        <button id="connectBtn" class="btn primary">连接服务</button>
+      </div>
+
+      <div class="card block">
+        <h3>个人设置</h3>
+        <label>昵称</label>
         <div class="row">
-          <input id="username" type="text" placeholder="例如：alice" />
-          <button id="renameBtn">修改</button>
+          <input id="username" placeholder="例如 alice" />
+          <button id="renameBtn" class="btn">改名</button>
         </div>
-      </section>
+      </div>
 
-      <section class="online card">
-        <div class="section-title">
-          <h2>在线用户</h2>
-          <button id="refreshBtn" class="text-btn">刷新</button>
+      <div class="card block">
+        <div class="row-between">
+          <h3>在线用户</h3>
+          <button id="refreshBtn" class="btn ghost">刷新</button>
         </div>
-        <ul id="onlineList">
-          <li>alice</li>
-          <li>bob</li>
-          <li>charlie</li>
-        </ul>
-      </section>
-
-      <section class="tips card">
-        <h2>协议快捷键</h2>
-        <p><code>who</code>：查询在线用户</p>
-        <p><code>rename|新名</code>：修改用户名</p>
-        <p><code>to|用户|消息</code>：私聊</p>
-      </section>
+        <ul id="onlineList"></ul>
+      </div>
     </aside>
 
-    <main class="chat-panel">
-      <header class="chat-header card">
+    <main class="main">
+      <header class="card topbar">
         <div>
           <h2>聊天室</h2>
-          <p>支持公聊与私聊模式切换</p>
+          <p>真正联通后端：公聊/私聊/改名/who 都会发到 TCP 服务端</p>
         </div>
-        <div class="mode-switch">
-          <button class="mode active" data-mode="public">公聊</button>
-          <button class="mode" data-mode="private">私聊</button>
+        <div class="modes">
+          <button class="btn mode active" data-mode="public">公聊</button>
+          <button class="btn mode" data-mode="private">私聊</button>
         </div>
       </header>
 
-      <section id="messageList" class="messages card">
-        <div class="msg system">欢迎来到 IM System Web UI（原型界面）</div>
-        <div class="msg incoming"><span class="sender">bob：</span>你好，今天讨论哪个需求？</div>
-        <div class="msg outgoing">先把 UI 原型搭起来，后面再接 TCP 网关。</div>
-      </section>
+      <section id="messages" class="card messages"></section>
 
-      <footer class="composer card">
-        <div class="row" id="privateRow" hidden>
+      <footer class="card composer">
+        <div id="privateRow" class="row" hidden>
           <label for="toUser">私聊对象</label>
-          <input id="toUser" type="text" placeholder="输入用户名" />
+          <input id="toUser" placeholder="输入在线用户名" />
         </div>
         <div class="row">
-          <textarea id="messageInput" rows="3" placeholder="输入消息后按发送..."></textarea>
-          <button id="sendBtn" class="send">发送</button>
+          <textarea id="messageInput" rows="3" placeholder="输入消息，点击发送"></textarea>
+          <button id="sendBtn" class="btn primary">发送</button>
         </div>
       </footer>
     </main>
