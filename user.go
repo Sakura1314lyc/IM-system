@@ -1,4 +1,4 @@
-﻿package main
+package main
 
 import (
 	"fmt"
@@ -120,7 +120,7 @@ func (this *User) DoMessage(msg string) {
 		this.Server.mapLock.Unlock()
 
 		this.SendMsg("您已成功更新用户名:" + this.Name + "\n")
-		this.Server.BroadCast(this, "已改名为 -> "+this.Name)
+		// 改名不对所有人广播，避免暴露历史操作，仅在线列表响应变化
 		return
 	}
 
@@ -134,15 +134,11 @@ func (this *User) DoMessage(msg string) {
 		targetName := strings.TrimSpace(parts[1])
 		content := strings.TrimSpace(parts[2])
 
-		this.Server.mapLock.RLock()
-		target, ok := this.Server.OnlineMap[targetName]
-		this.Server.mapLock.RUnlock()
-		if !ok {
-			this.SendMsg("用户[" + targetName + "]不在线\n")
+		if err := this.Server.SendPrivate(this.Name, targetName, content); err != nil {
+			this.SendMsg(err.Error() + "\n")
 			return
 		}
 
-		target.SendMsg("[私聊] " + this.Name + ": " + content + "\n")
 		this.SendMsg("[已发送] " + content + "\n")
 		return
 	}

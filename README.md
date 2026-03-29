@@ -6,12 +6,13 @@
 
 ## 项目概览
 
-本项目当前由 4 个核心文件组成：
+本项目当前由多个核心模块组成：
 
-- `main.go`：服务端启动入口。
-- `server.go`：服务端核心逻辑（监听连接、转发广播、超时踢出）。
+- `main.go`：服务端启动入口（含 TCP IM 服务与 Web REST/SSE 服务）。
+- `server.go`：服务端核心逻辑（监听连接、转发广播、超时踢出、Web API）。
 - `user.go`：用户模型与命令处理（`who` / `rename|` / `to|`）。
-- `client.go`：命令行客户端（公聊、私聊、改名）。
+- `cmd/client/main.go`：命令行客户端（公聊、私聊、改名）。
+- `web/`：前端 UI 原型，包含 `index.html`、`styles.css`、`app.js`。
 
 ## 功能清单（与当前代码一致）
 
@@ -36,12 +37,27 @@
 在项目根目录执行：
 
 ```bash
+go run .
+```
+
+或者（显式传入文件，避免漏掉 `server.go`/`user.go`）：
+
+```bash
 go run main.go server.go user.go
 ```
 
-服务默认监听：`127.0.0.1:8888`
+默认服务地址：
 
-> 说明：服务端入口在 `main.go`，依赖 `server.go` 和 `user.go`，因此建议按上面的方式一起运行。
+- TCP IM 服务：`127.0.0.1:8888`（老版命令行客户端互通）。
+- Web UI 服务：`:8080`（浏览器访问 `http://127.0.0.1:8080/`）。
+
+支持参数：
+
+```bash
+go run . -ip 127.0.0.1 -port 8888 -web :8080
+```
+
+> 说明：`main.go` 同时启动了 TCP 服务与 Web 服务，`server.go`、`user.go` 提供了核心 IM 逻辑。
 
 ---
 
@@ -50,7 +66,7 @@ go run main.go server.go user.go
 新开一个终端窗口：
 
 ```bash
-go run client.go -ip 127.0.0.1 -port 8888
+go run ./cmd/client/main.go -ip 127.0.0.1 -port 8888
 ```
 
 可再开多个终端重复执行上面命令，模拟多个用户在线。
@@ -113,28 +129,29 @@ to|alice|你好
 - [ ] 完善单元测试与集成测试。
 
 
-## Web UI 原型
+## Web UI 已接入后端（支持前后端实时连通）
 
-为了便于你快速演示产品形态，仓库新增了一个静态前端原型（未直接连接 TCP 服务端）：
+新的 `main.go` 已集成 Web API + SSE，前端可直接与后端交互：
 
-- `web/index.html`：页面结构（侧边栏 + 聊天面板 + 输入区）
-- `web/styles.css`：现代化卡片式布局与响应式样式
-- `web/app.js`：基础交互（公聊/私聊切换、发送消息回显）
+- `GET /api/events?name=<昵称>`：SSE 实时接收消息
+- `GET /api/online`：获取当前在线用户列表
+- `POST /api/send`：发送消息（支持公聊/私聊）
+- `POST /api/rename`：修改昵称
 
-### 本地预览
+静态页面已被放在 `web/` 目录：
 
-你可以任选一种方式预览：
+- `web/index.html`：页面结构
+- `web/styles.css`：界面风格增强
+- `web/app.js`：改为真实 API 调用 + 响应式消息流
 
-```bash
-# 方式 1：直接用浏览器打开
-open web/index.html
+### 访问步骤
 
-# 方式 2：启动一个静态文件服务（推荐）
-python3 -m http.server 8080
-# 然后访问 http://127.0.0.1:8080/web/
-```
+1. 运行服务：`go run main.go server.go user.go`
+2. 打开浏览器：`http://127.0.0.1:8080/`
+3. 在“昵称”输入框设置用户名，点击“修改”。
+4. 切换公聊/私聊，输入消息发送。
 
-> 说明：当前 UI 是“高保真原型”，后续如需接入实时通信，可增加 WebSocket 网关，转发到现有 TCP IM 服务。
+> 注：TCP CLI 用户（`go run ./cmd/client/main.go`）与 Web UI 用户可混合在线互通。
 
 
 ### 截图说明（browser_container 不可用时）
