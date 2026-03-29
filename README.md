@@ -14,7 +14,7 @@
 - `cmd/client/main.go`：命令行客户端（公聊、私聊、改名）。
 - `web/`：前端 UI 原型，包含 `index.html`、`styles.css`、`app.js`。
 
-## 功能清单（与当前代码一致）
+## 功能清单
 
 - ✅ TCP 长连接聊天（非 WebSocket）。
 - ✅ 在线用户上线/下线广播。
@@ -153,16 +153,25 @@ to|alice|你好
 
 > 注：TCP CLI 用户（`go run ./cmd/client/main.go`）与 Web UI 用户可混合在线互通。
 
+```bash
+go run ./cmd/web -listen :8080 -tcp 127.0.0.1:8888
+```
+
+3）浏览器打开：
+
+```text
+http://127.0.0.1:8080/
+```
 
 ### 截图说明（browser_container 不可用时）
 
 如果你的 Agent 运行环境没有提供 `browser_container` 工具（例如仅有 shell），可以用以下方式替代：
 
-1. 本地直接访问 `http://127.0.0.1:8080/web/`（先执行 `python3 -m http.server 8080`）。
+1. 本地直接访问 `http://127.0.0.1:8080/`。
 2. 使用系统截图工具手动截取页面。
 3. 如果仓库已安装 Playwright/Puppeteer，可写自动化脚本产出截图；若未安装，不建议在受限环境中临时安装。
 
-> 结论：`browser_container` 不是项目内配置项，而是平台提供的能力；项目侧无法“开启”它，只能在支持该工具的平台会话中使用。
+> `browser_container` 不是项目内配置项，而是平台提供的能力；项目侧无法“开启”它。
 
 ## 测试
 
