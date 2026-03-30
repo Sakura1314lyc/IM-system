@@ -7,7 +7,7 @@
   <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
-  <div class="app">
+  <div class="layout">
     <aside class="sidebar">
       <div class="brand">
         <h1>🌸 IM System</h1>
@@ -15,12 +15,13 @@
       </div>
 
       <section class="profile card">
-        <label for="username">👤 昵称</label>
-        <div class="row">
-          <input id="username" type="text" placeholder="例如:alice" />
-          <button id="renameBtn">✨ 修改</button>
-        </div>
-      </div>
+        <label for="username">👤 用户名</label>
+        <input id="username" type="text" placeholder="例如: alice" />
+        <label for="password">🔒 密码</label>
+        <input id="password" type="password" placeholder="例如: 123" />
+        <button id="connectBtn">🔌 连接</button>
+        <p class="hint">默认用户: alice/bob/charlie 密码均为 123</p>
+      </section>
 
       <section class="online card">
         <div class="section-title">
@@ -51,6 +52,7 @@
         <div class="mode-switch">
           <button class="mode active" data-mode="public">🌟 公聊</button>
           <button class="mode" data-mode="private">💌 私聊</button>
+          <button class="mode" data-mode="group">👥 群聊</button>
         </div>
       </header>
 

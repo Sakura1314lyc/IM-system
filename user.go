@@ -8,10 +8,11 @@ import (
 )
 
 type User struct {
-	Name string
-	Addr string
-	C    chan string
-	conn net.Conn
+	Name            string
+	Addr            string
+	C               chan string
+	conn            net.Conn
+	IsAuthenticated bool
 
 	Server *Server
 }
@@ -58,6 +59,29 @@ func (this *User) SendMsg(msg string) {
 
 // 用户处理消息的业务
 func (this *User) DoMessage(msg string) {
+	if !this.IsAuthenticated {
+		if strings.HasPrefix(msg, "login|") {
+			parts := strings.Split(msg, "|")
+			if len(parts) != 3 {
+				this.SendMsg("登录格式错误,示例:login|username|password\n")
+				return
+			}
+			username := strings.TrimSpace(parts[1])
+			password := strings.TrimSpace(parts[2])
+			if this.Server.Authenticate(username, password) {
+				this.Name = username
+				this.IsAuthenticated = true
+				this.Online()
+				this.SendMsg("登录成功\n")
+			} else {
+				this.SendMsg("用户名或密码错误\n")
+			}
+		} else {
+			this.SendMsg("请先登录,格式:login|username|password\n")
+		}
+		return
+	}
+
 	msg = strings.TrimSpace(msg)
 	lower := strings.ToLower(msg)
 	if lower == "who" {
@@ -140,6 +164,64 @@ func (this *User) DoMessage(msg string) {
 		}
 
 		this.SendMsg("[已发送] " + content + "\n")
+		return
+	}
+
+	if strings.HasPrefix(lower, "group|") {
+		parts := strings.SplitN(msg, "|", 3)
+		if len(parts) < 2 {
+			this.SendMsg("群聊命令格式错误,示例:group|create|群名 或 group|join|群名 或 group|leave|群名 或 group|send|群名|消息\n")
+			return
+		}
+		cmd := strings.TrimSpace(parts[1])
+		switch cmd {
+		case "create":
+			if len(parts) != 3 {
+				this.SendMsg("创建群格式:group|create|群名\n")
+				return
+			}
+			groupName := strings.TrimSpace(parts[2])
+			if err := this.Server.CreateGroup(groupName, this.Name); err != nil {
+				this.SendMsg(err.Error() + "\n")
+				return
+			}
+			this.SendMsg("群组 " + groupName + " 创建成功\n")
+		case "join":
+			if len(parts) != 3 {
+				this.SendMsg("加入群格式:group|join|群名\n")
+				return
+			}
+			groupName := strings.TrimSpace(parts[2])
+			if err := this.Server.JoinGroup(groupName, this.Name); err != nil {
+				this.SendMsg(err.Error() + "\n")
+				return
+			}
+			this.SendMsg("已加入群组 " + groupName + "\n")
+		case "leave":
+			if len(parts) != 3 {
+				this.SendMsg("离开群格式:group|leave|群名\n")
+				return
+			}
+			groupName := strings.TrimSpace(parts[2])
+			if err := this.Server.LeaveGroup(groupName, this.Name); err != nil {
+				this.SendMsg(err.Error() + "\n")
+				return
+			}
+			this.SendMsg("已离开群组 " + groupName + "\n")
+		case "send":
+			if len(parts) != 4 {
+				this.SendMsg("群聊发送格式:group|send|群名|消息\n")
+				return
+			}
+			groupName := strings.TrimSpace(parts[2])
+			content := strings.TrimSpace(parts[3])
+			if err := this.Server.BroadCastToGroup(groupName, this.Name, content); err != nil {
+				this.SendMsg(err.Error() + "\n")
+				return
+			}
+		default:
+			this.SendMsg("未知群聊命令\n")
+		}
 		return
 	}
 

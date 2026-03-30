@@ -6,6 +6,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -14,6 +15,10 @@ import (
 type WebClient struct {
 	Name string
 	C    chan string
+}
+
+type UserCred struct {
+	Password string
 }
 
 type Server struct {
@@ -28,6 +33,14 @@ type Server struct {
 	WebClients map[string]*WebClient
 	webLock    sync.RWMutex
 
+	//用户凭据存储
+	UserCreds map[string]*UserCred
+	credLock  sync.RWMutex
+
+	//群组: 群名 -> 用户列表
+	Groups    map[string][]string
+	groupLock sync.RWMutex
+
 	//消息广播的channel
 	Message chan string
 }
@@ -39,20 +52,145 @@ func Newserver(ip string, port int) *Server {
 		Port:       port,
 		OnlineMap:  make(map[string]*User),
 		WebClients: make(map[string]*WebClient),
+		UserCreds:  make(map[string]*UserCred),
+		Groups:     make(map[string][]string),
 		Message:    make(chan string),
 	}
+
+	// 添加一些默认用户
+	server.UserCreds["alice"] = &UserCred{Password: "123"}
+	server.UserCreds["bob"] = &UserCred{Password: "123"}
+	server.UserCreds["charlie"] = &UserCred{Password: "123"}
 
 	return server
 }
 
+// 验证用户凭据
+func (this *Server) Authenticate(username, password string) bool {
+	this.credLock.RLock()
+	defer this.credLock.RUnlock()
+	if cred, ok := this.UserCreds[username]; ok && cred.Password == password {
+		return true
+	}
+	return false
+}
+
+// 注册新用户
+func (this *Server) Register(username, password string) error {
+	if strings.TrimSpace(username) == "" || strings.TrimSpace(password) == "" {
+		return fmt.Errorf("用户名和密码不能为空")
+	}
+	if len(username) > 20 || len(password) > 50 {
+		return fmt.Errorf("用户名或密码过长")
+	}
+	this.credLock.Lock()
+	defer this.credLock.Unlock()
+	if _, exists := this.UserCreds[username]; exists {
+		return fmt.Errorf("用户名已存在")
+	}
+	this.UserCreds[username] = &UserCred{Password: password}
+	return nil
+}
+
+// 群聊广播
+func (this *Server) BroadCastToGroup(groupName, from, msg string) error {
+	msg = sanitizeInput(msg)
+	this.groupLock.RLock()
+	members, exists := this.Groups[groupName]
+	this.groupLock.RUnlock()
+	if !exists {
+		return fmt.Errorf("群组不存在")
+	}
+
+	sendMsg := fmt.Sprintf("[群聊 %s] %s: %s", groupName, from, msg)
+	fmt.Printf("[%s] Group broadcast to %s from %s: %s\n", time.Now().Format("2006-01-02 15:04:05"), groupName, from, msg)
+
+	for _, member := range members {
+		this.mapLock.RLock()
+		if user, ok := this.OnlineMap[member]; ok {
+			user.SendMsg(sendMsg + "\n")
+		}
+		this.mapLock.RUnlock()
+
+		this.webLock.RLock()
+		if client, ok := this.WebClients[member]; ok {
+			select {
+			case client.C <- sendMsg:
+			default:
+			}
+		}
+		this.webLock.RUnlock()
+	}
+	return nil
+}
+
+// 输入验证：过滤恶意内容
+func sanitizeInput(input string) string {
+	// 移除HTML标签
+	re := regexp.MustCompile(`<[^>]*>`)
+	input = re.ReplaceAllString(input, "")
+	// 限制长度
+	if len(input) > 500 {
+		input = input[:500] + "..."
+	}
+	return strings.TrimSpace(input)
+}
+
+// 创建群组
+func (this *Server) CreateGroup(groupName, creator string) error {
+	this.groupLock.Lock()
+	defer this.groupLock.Unlock()
+	if _, exists := this.Groups[groupName]; exists {
+		return fmt.Errorf("群组已存在")
+	}
+	this.Groups[groupName] = []string{creator}
+	return nil
+}
+
+// 加入群组
+func (this *Server) JoinGroup(groupName, user string) error {
+	this.groupLock.Lock()
+	defer this.groupLock.Unlock()
+	members, exists := this.Groups[groupName]
+	if !exists {
+		return fmt.Errorf("群组不存在")
+	}
+	for _, m := range members {
+		if m == user {
+			return fmt.Errorf("已在群组中")
+		}
+	}
+	this.Groups[groupName] = append(members, user)
+	return nil
+}
+
+// 离开群组
+func (this *Server) LeaveGroup(groupName, user string) error {
+	this.groupLock.Lock()
+	defer this.groupLock.Unlock()
+	members, exists := this.Groups[groupName]
+	if !exists {
+		return fmt.Errorf("群组不存在")
+	}
+	for i, m := range members {
+		if m == user {
+			this.Groups[groupName] = append(members[:i], members[i+1:]...)
+			return nil
+		}
+	}
+	return fmt.Errorf("不在群组中")
+}
+
 // 广播消息的方法
 func (this *Server) BroadCast(user *User, msg string) {
+	msg = sanitizeInput(msg)
 	sendMsg := "[" + user.Addr + "]" + user.Name + ":" + msg
 	fmt.Printf("[%s] Broadcast from %s(%s): %s\n", time.Now().Format("2006-01-02 15:04:05"), user.Name, user.Addr, msg)
 	this.Message <- sendMsg
 }
 
 func (this *Server) BroadCastFromWeb(name string, msg string) {
+	msg = sanitizeInput(msg)
 	sendMsg := "[WEB]" + name + ":" + msg
 	fmt.Printf("[%s] Broadcast from WEB user %s: %s\n", time.Now().Format("2006-01-02 15:04:05"), name, msg)
 	this.Message <- sendMsg
@@ -127,6 +265,7 @@ func (this *Server) RenameWebClient(oldName, newName string) error {
 }
 
 func (this *Server) SendPrivate(from, to, content string) error {
+	content = sanitizeInput(content)
 	this.mapLock.RLock()
 	if user, ok := this.OnlineMap[to]; ok {
 		user.SendMsg("[私聊] " + from + ": " + content + "\n")
@@ -243,8 +382,14 @@ func (this *Server) Handler(conn net.Conn) {
 
 func (this *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 	name := r.URL.Query().Get("name")
-	if name == "" {
-		http.Error(w, "缺少用户名参数 name", http.StatusBadRequest)
+	password := r.URL.Query().Get("password")
+	if name == "" || password == "" {
+		http.Error(w, "缺少用户名或密码参数", http.StatusBadRequest)
+		return
+	}
+
+	if !this.Authenticate(name, password) {
+		http.Error(w, "认证失败", http.StatusUnauthorized)
 		return
 	}
 
@@ -318,8 +463,22 @@ func (this *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if data.Mode == "group" && strings.TrimSpace(data.To) == "" {
+		http.Error(w, "群聊必须指定 to (群名)", http.StatusBadRequest)
+		return
+	}
+
 	if data.Mode == "private" {
 		if err := this.SendPrivate(data.Name, data.To, data.Message); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	if data.Mode == "group" {
+		if err := this.BroadCastToGroup(data.To, data.Name, data.Message); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -384,6 +543,7 @@ func (this *Server) Start() {
 	listener, err := net.Listen("tcp", fmt.Sprintf("%s:%d", this.Ip, this.Port))
 	if err != nil {
 		fmt.Println("net.Listen err:", err)
+		return
 	}
 	//close listen socket
 	defer listener.Close()
@@ -396,7 +556,6 @@ func (this *Server) Start() {
 		if err != nil {
 			fmt.Println("listener accept err:", err)
 			continue
-
 		}
 
 		//do handler
