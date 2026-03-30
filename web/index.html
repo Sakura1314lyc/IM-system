@@ -7,70 +7,178 @@
   <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
-  <div class="layout">
-    <aside class="sidebar">
-      <div class="brand">
+  <!-- 登录界面 -->
+  <div id="loginPanel" class="panel login-panel">
+    <div class="login-container">
+      <div class="login-header">
         <h1>🌸 IM System</h1>
-        <p>轻量即时通信</p>
+        <p>即时通信系统</p>
       </div>
-
-      <section class="profile card">
-        <label for="username">👤 用户名</label>
-        <input id="username" type="text" placeholder="例如: alice" />
-        <label for="password">🔒 密码</label>
-        <input id="password" type="password" placeholder="例如: 123" />
-        <button id="connectBtn">🔌 连接</button>
+      
+      <form class="login-form" id="loginForm">
+        <div class="form-group">
+          <label for="username">用户名</label>
+          <input
+            id="username"
+            type="text"
+            placeholder="例如: alice"
+            autocomplete="off"
+          />
+        </div>
+        
+        <div class="form-group">
+          <label for="password">密码</label>
+          <input id="password" type="password" placeholder="例如: 123" />
+        </div>
+        
+        <button id="connectBtn" type="button" class="btn btn-primary btn-lg">
+          🔌 连接到服务器
+        </button>
+        
         <p class="hint">默认用户: alice/bob/charlie 密码均为 123</p>
+      </form>
+    </div>
+  </div>
+
+  <!-- 主聊天界面 -->
+  <div id="chatPanel" class="panel chat-panel" style="display: none">
+    <!-- 侧边栏 -->
+    <aside class="sidebar">
+      <!-- 用户卡片 -->
+      <section class="user-card card">
+        <div class="avatar-display" id="userAvatar">👤</div>
+        <h3 id="userNameDisplay">未登录</h3>
+        <p class="status" id="userStatus">离线</p>
+        <button id="logoutBtn" class="btn btn-secondary btn-sm">退出登录</button>
       </section>
 
-      <section class="online card">
-        <div class="section-title">
-          <h2>👥 在线用户</h2>
-          <button id="refreshBtn" class="text-btn">🔄 刷新</button>
+      <!-- 在线用户列表 -->
+      <section class="online-section card">
+        <div class="section-header">
+          <h3>👥 在线用户</h3>
+          <button id="refreshBtn" class="text-btn" title="刷新">🔄</button>
         </div>
-        <ul id="onlineList">
-          <li>alice</li>
-          <li>bob</li>
-          <li>charlie</li>
+        <ul id="onlineList" class="user-list">
+          <li class="loading">加载中...</li>
         </ul>
       </section>
 
-      <section class="tips card">
-        <h2>💖 协议快捷键</h2>
-        <p><code>who</code>：查询在线用户</p>
-        <p><code>rename|新名</code>：修改用户名</p>
-        <p><code>to|用户|消息</code>：私聊</p>
+      <!-- 操作面板 -->
+      <section class="actions card">
+        <h3>⚙️ 快捷操作</h3>
+        <button id="showGroupsBtn" class="btn btn-secondary btn-block">📋 我的群组</button>
+        <button id="showSettingsBtn" class="btn btn-secondary btn-block">🎨 界面设置</button>
       </section>
     </aside>
 
-    <main class="main">
-      <header class="card topbar">
-        <div>
-          <h2>💬 聊天室</h2>
-          <p>支持公聊与私聊模式切换</p>
+    <!-- 主内容区 -->
+    <main class="main-content">
+      <!-- 顶部栏 -->
+      <header class="topbar card">
+        <div class="title-section">
+          <h2 id="chatTitle">💬 聊天室</h2>
+          <p id="chatSubtitle" class="subtitle">选择聊天模式开始交流</p>
         </div>
-        <div class="mode-switch">
-          <button class="mode active" data-mode="public">🌟 公聊</button>
-          <button class="mode" data-mode="private">💌 私聊</button>
-          <button class="mode" data-mode="group">👥 群聊</button>
+        
+        <div class="mode-selector">
+          <button class="mode-btn active" data-mode="public">🌟 公聊</button>
+          <button class="mode-btn" data-mode="private">💌 私聊</button>
+          <button class="mode-btn" data-mode="group">👥 群聊</button>
         </div>
       </header>
 
+      <!-- 消息列表 -->
       <section id="messageList" class="messages card">
-        <div class="msg system">🎉 欢迎来到 IM System Web UI,已连接后端服务并可与 CLI 客户端互通。</div>
+        <div class="msg system">
+          🎉 欢迎来到 IM System Web UI，已连接后端服务。
+        </div>
       </section>
 
-      <footer class="composer card">
-        <div class="row" id="privateRow" hidden>
+      <!-- 输入区 -->
+      <footer class="message-composer card">
+        <div id="privateRow" class="input-row" style="display: none">
           <label for="toUser">💌 私聊对象</label>
-          <input id="toUser" type="text" placeholder="输入用户名" />
+          <input id="toUser" type="text" placeholder="输入用户名" class="target-input" />
         </div>
-        <div class="row">
-          <textarea id="messageInput" rows="3" placeholder="输入消息后按发送..."></textarea>
-          <button id="sendBtn" class="send">🚀 发送</button>
+        <div id="groupRow" class="input-row" style="display: none">
+          <label for="toGroup">👥 群名</label>
+          <input id="toGroup" type="text" placeholder="输入群名称" class="target-input" />
+        </div>
+        <div class="input-row">
+          <textarea
+            id="messageInput"
+            rows="3"
+            placeholder="输入消息，Shift+Enter 换行，Enter 发送..."
+            class="message-textarea"
+          ></textarea>
+          <button id="sendBtn" class="btn btn-primary send-btn">🚀 发送</button>
         </div>
       </footer>
     </main>
+  </div>
+
+  <!-- 群组管理界面 -->
+  <div id="groupsPanel" class="panel groups-panel" style="display: none">
+    <div class="panel-header">
+      <h2>📋 群组管理</h2>
+      <button class="close-btn" onclick="showPanel('chat')">&times;</button>
+    </div>
+    
+    <div class="panel-content">
+      <section class="card">
+        <h3>创建新群组</h3>
+        <div class="form-group">
+          <input id="newGroupName" type="text" placeholder="输入群组名称" />
+          <button id="createGroupBtn" class="btn btn-primary">✨ 创建</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h3>我的群组</h3>
+        <ul id="myGroupsList" class="group-list">
+          <li class="empty">暂无群组</li>
+        </ul>
+      </section>
+    </div>
+  </div>
+
+  <!-- 设置界面 -->
+  <div id="settingsPanel" class="panel settings-panel" style="display: none">
+    <div class="panel-header">
+      <h2>🎨 界面设置</h2>
+      <button class="close-btn" onclick="showPanel('chat')">&times;</button>
+    </div>
+    
+    <div class="panel-content">
+      <section class="card">
+        <h3>主题设置</h3>
+        <label class="checkbox-label">
+          <input type="checkbox" id="darkModeToggle" />
+          深色模式
+        </label>
+      </section>
+
+      <section class="card">
+        <h3>消息设置</h3>
+        <label class="checkbox-label">
+          <input type="checkbox" id="soundToggle" checked />
+          消息声音提示
+        </label>
+        <label class="checkbox-label">
+          <input type="checkbox" id="notificationToggle" checked />
+          浏览器通知
+        </label>
+      </section>
+
+      <section class="card">
+        <h3>显示设置</h3>
+        <label>字体大小</label>
+        <div class="slider">
+          <input type="range" id="fontSizeSlider" min="12" max="18" value="14" />
+          <span id="fontSizeValue">14px</span>
+        </div>
+      </section>
+    </div>
   </div>
 
   <script src="./app.js"></script>

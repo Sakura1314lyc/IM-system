@@ -13,12 +13,15 @@ import (
 )
 
 type WebClient struct {
-	Name string
-	C    chan string
+	Name   string
+	C      chan string
+	Avatar string // 用户头像
 }
 
+// 使用更好的类型定义（兼容旧版本）
 type UserCred struct {
 	Password string
+	Avatar   string // 添加头像支持
 }
 
 type Server struct {
@@ -57,22 +60,50 @@ func Newserver(ip string, port int) *Server {
 		Message:    make(chan string),
 	}
 
-	// 添加一些默认用户
-	server.UserCreds["alice"] = &UserCred{Password: "123"}
-	server.UserCreds["bob"] = &UserCred{Password: "123"}
-	server.UserCreds["charlie"] = &UserCred{Password: "123"}
+	// 添加一些默认用户（支持头像）
+	avatars := []string{"👨‍💼", "👩‍💼", "👨‍💻"}
+	names := []string{"alice", "bob", "charlie"}
+	for i, name := range names {
+		server.UserCreds[name] = &UserCred{
+			Password: "123",
+			Avatar:   avatars[i],
+		}
+	}
 
 	return server
 }
 
-// 验证用户凭据
-func (this *Server) Authenticate(username, password string) bool {
+// 验证用户凭据 - 返回(是否验证成功, 用户头像)
+func (this *Server) Authenticate(username, password string) (string, bool) {
 	this.credLock.RLock()
 	defer this.credLock.RUnlock()
 	if cred, ok := this.UserCreds[username]; ok && cred.Password == password {
-		return true
+		return cred.Avatar, true
 	}
-	return false
+	return "", false
+}
+
+// 原子性重命名用户 - 修复并发问题
+func (this *Server) RenameUser(oldName, newName string) bool {
+	this.mapLock.Lock()
+	defer this.mapLock.Unlock()
+
+	// 检查新名称是否已被使用
+	if _, exists := this.OnlineMap[newName]; exists {
+		return false
+	}
+
+	// 获取旧用户对象
+	user, ok := this.OnlineMap[oldName]
+	if !ok {
+		return false
+	}
+
+	// 原子性地删除旧的和添加新的
+	delete(this.OnlineMap, oldName)
+	this.OnlineMap[newName] = user
+
+	return true
 }
 
 // 注册新用户
@@ -88,12 +119,15 @@ func (this *Server) Register(username, password string) error {
 	if _, exists := this.UserCreds[username]; exists {
 		return fmt.Errorf("用户名已存在")
 	}
-	this.UserCreds[username] = &UserCred{Password: password}
+	this.UserCreds[username] = &UserCred{
+		Password: password,
+		Avatar:   "👤", // 默认头像
+	}
 	return nil
 }
 
 // 群聊广播
-func (this *Server) BroadCastToGroup(groupName, from, msg string) error {
+func (this *Server) BroadCastToGroup(groupName, from, msg, avatar string) error {
 	msg = sanitizeInput(msg)
 	this.groupLock.RLock()
 	members, exists := this.Groups[groupName]
@@ -102,7 +136,7 @@ func (this *Server) BroadCastToGroup(groupName, from, msg string) error {
 		return fmt.Errorf("群组不存在")
 	}
 
-	sendMsg := fmt.Sprintf("[群聊 %s] %s: %s", groupName, from, msg)
+	sendMsg := fmt.Sprintf("[群聊 %s] %s %s: %s", groupName, avatar, from, msg)
 	fmt.Printf("[%s] Group broadcast to %s from %s: %s\n", time.Now().Format("2006-01-02 15:04:05"), groupName, from, msg)
 
 	for _, member := range members {
@@ -184,14 +218,14 @@ func (this *Server) LeaveGroup(groupName, user string) error {
 // 广播消息的方法
 func (this *Server) BroadCast(user *User, msg string) {
 	msg = sanitizeInput(msg)
-	sendMsg := "[" + user.Addr + "]" + user.Name + ":" + msg
+	sendMsg := "[" + user.Addr + "] " + user.Avatar + " " + user.Name + ": " + msg
 	fmt.Printf("[%s] Broadcast from %s(%s): %s\n", time.Now().Format("2006-01-02 15:04:05"), user.Name, user.Addr, msg)
 	this.Message <- sendMsg
 }
 
-func (this *Server) BroadCastFromWeb(name string, msg string) {
+func (this *Server) BroadCastFromWeb(name string, msg string, avatar string) {
 	msg = sanitizeInput(msg)
-	sendMsg := "[WEB]" + name + ":" + msg
+	sendMsg := "[WEB] " + avatar + " " + name + ": " + msg
 	fmt.Printf("[%s] Broadcast from WEB user %s: %s\n", time.Now().Format("2006-01-02 15:04:05"), name, msg)
 	this.Message <- sendMsg
 }
@@ -211,18 +245,24 @@ func (this *Server) RemoveWebClient(name string) {
 	delete(this.WebClients, name)
 }
 
-func (this *Server) GetOnlineUsers() []string {
-	users := make([]string, 0)
+func (this *Server) GetOnlineUsers() []map[string]string {
+	users := make([]map[string]string, 0)
 
 	this.mapLock.RLock()
 	for _, u := range this.OnlineMap {
-		users = append(users, u.Name)
+		users = append(users, map[string]string{
+			"name":   u.Name,
+			"avatar": u.Avatar,
+		})
 	}
 	this.mapLock.RUnlock()
 
 	this.webLock.RLock()
-	for name := range this.WebClients {
-		users = append(users, name)
+	for name, client := range this.WebClients {
+		users = append(users, map[string]string{
+			"name":   name,
+			"avatar": client.Avatar,
+		})
 	}
 	this.webLock.RUnlock()
 
@@ -264,11 +304,11 @@ func (this *Server) RenameWebClient(oldName, newName string) error {
 	return nil
 }
 
-func (this *Server) SendPrivate(from, to, content string) error {
+func (this *Server) SendPrivate(from, to, content, avatar string) error {
 	content = sanitizeInput(content)
 	this.mapLock.RLock()
 	if user, ok := this.OnlineMap[to]; ok {
-		user.SendMsg("[私聊] " + from + ": " + content + "\n")
+		user.SendMsg("[私聊] " + avatar + " " + from + ": " + content + "\n")
 		this.mapLock.RUnlock()
 		return nil
 	}
@@ -276,7 +316,7 @@ func (this *Server) SendPrivate(from, to, content string) error {
 
 	this.webLock.RLock()
 	if client, ok := this.WebClients[to]; ok {
-		client.C <- "[私聊] " + from + ": " + content
+		client.C <- "[私聊] " + avatar + " " + from + ": " + content
 		this.webLock.RUnlock()
 		return nil
 	}
@@ -388,7 +428,8 @@ func (this *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !this.Authenticate(name, password) {
+	avatar, ok := this.Authenticate(name, password)
+	if !ok {
 		http.Error(w, "认证失败", http.StatusUnauthorized)
 		return
 	}
@@ -406,7 +447,7 @@ func (this *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	client := &WebClient{Name: name, C: make(chan string, 100)}
+	client := &WebClient{Name: name, C: make(chan string, 100), Avatar: avatar}
 	this.AddWebClient(client)
 	defer this.RemoveWebClient(name)
 
@@ -432,7 +473,7 @@ func (this *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 func (this *Server) handleOnline(w http.ResponseWriter, r *http.Request) {
 	users := this.GetOnlineUsers()
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{"online": users})
+	json.NewEncoder(w).Encode(map[string]interface{}{"online": users})
 }
 
 func (this *Server) handleSend(w http.ResponseWriter, r *http.Request) {
@@ -468,8 +509,16 @@ func (this *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 获取发送者头像
+	avatar := ""
+	this.webLock.RLock()
+	if client, ok := this.WebClients[data.Name]; ok {
+		avatar = client.Avatar
+	}
+	this.webLock.RUnlock()
+
 	if data.Mode == "private" {
-		if err := this.SendPrivate(data.Name, data.To, data.Message); err != nil {
+		if err := this.SendPrivate(data.Name, data.To, data.Message, avatar); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -478,7 +527,7 @@ func (this *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if data.Mode == "group" {
-		if err := this.BroadCastToGroup(data.To, data.Name, data.Message); err != nil {
+		if err := this.BroadCastToGroup(data.To, data.Name, data.Message, avatar); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -486,7 +535,7 @@ func (this *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	this.BroadCastFromWeb(data.Name, data.Message)
+	this.BroadCastFromWeb(data.Name, data.Message, avatar)
 	w.WriteHeader(http.StatusNoContent)
 }
 

@@ -1,9 +1,11 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"net"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -13,6 +15,8 @@ type User struct {
 	C               chan string
 	conn            net.Conn
 	IsAuthenticated bool
+	Avatar          string // 用户头像
+	mu              sync.RWMutex
 
 	Server *Server
 }
@@ -50,11 +54,27 @@ func (this *User) Online() {
 
 // 给当前user对应的客户端发送消息
 func (this *User) SendMsg(msg string) {
+	if this.conn == nil {
+		return
+	}
 	_, err := this.conn.Write([]byte(msg))
 	if err != nil {
-		fmt.Println("SendMsg err:", err)
+		fmt.Printf("SendMsg error: %v\n", err)
 		this.Offline()
 	}
+}
+
+// 用户上线的业务
+func (this *User) Online() {
+	//用户上线 将用户加入到onlineMap中
+	this.Server.mapLock.Lock()
+	this.Server.OnlineMap[this.Name] = this
+	this.Server.mapLock.Unlock()
+
+	fmt.Printf("[%s] 用户 %s(%s) 上线\n", time.Now().Format("2006-01-02 15:04:05"), this.Name, this.Addr)
+
+	//广播当前用户上线消息
+	this.Server.BroadCast(this, "已上线")
 }
 
 // 用户处理消息的业务
@@ -68,8 +88,9 @@ func (this *User) DoMessage(msg string) {
 			}
 			username := strings.TrimSpace(parts[1])
 			password := strings.TrimSpace(parts[2])
-			if this.Server.Authenticate(username, password) {
+			if avatar, ok := this.Server.Authenticate(username, password); ok {
 				this.Name = username
+				this.Avatar = avatar
 				this.IsAuthenticated = true
 				this.Online()
 				this.SendMsg("登录成功\n")
@@ -84,6 +105,7 @@ func (this *User) DoMessage(msg string) {
 
 	msg = strings.TrimSpace(msg)
 	lower := strings.ToLower(msg)
+
 	if lower == "who" {
 		// 查询当前有哪些在线用户
 		this.Server.mapLock.RLock()
@@ -95,6 +117,7 @@ func (this *User) DoMessage(msg string) {
 		return
 	}
 
+	// 处理 rename 命令 - 注意：修复了前面的逻辑混乱问题
 	if strings.HasPrefix(lower, "rename|") {
 		parts := strings.SplitN(msg, "|", 2)
 		if len(parts) != 2 || strings.TrimSpace(parts[1]) == "" {
@@ -103,51 +126,19 @@ func (this *User) DoMessage(msg string) {
 		}
 
 		newName := strings.TrimSpace(parts[1])
-
-		this.Server.mapLock.RLock()
-		_, exists := this.Server.OnlineMap[newName]
-		this.Server.mapLock.RUnlock()
-		if exists {
+		// 修复并发问题：检查和修改需要原子化
+		if this.Server.RenameUser(this.Name, newName) {
+			this.mu.Lock()
+			this.Name = newName
+			this.mu.Unlock()
+			this.SendMsg("您已成功更新用户名:" + newName + "\n")
+		} else {
 			this.SendMsg("当前用户名已被使用\n")
-			return
 		}
-
-		if strings.HasPrefix(msg, "to|") {
-			//私聊
-
-			//获取用户名
-			remoteName := strings.Split(msg, "|")[1]
-			if remoteName == "" {
-				this.SendMsg("消息格式不正确, 示例: to|username|你好啊\n")
-				return
-			}
-
-			//根据用户名 得到对方User对象
-			remoteUser, ok := this.Server.OnlineMap[remoteName]
-			if !ok {
-				this.SendMsg("该用户名不存在\n")
-				return
-			}
-			//获取内容 将消息发送过去
-
-			content := strings.Split(msg, "|")[2]
-			if content == "" {
-				this.SendMsg("无消息内容,请重新发送\n")
-				return
-			}
-			remoteUser.SendMsg(this.Name + "对您说" + content)
-		}
-		this.Server.mapLock.Lock()
-		delete(this.Server.OnlineMap, this.Name)
-		this.Name = newName
-		this.Server.OnlineMap[this.Name] = this
-		this.Server.mapLock.Unlock()
-
-		this.SendMsg("您已成功更新用户名:" + this.Name + "\n")
-		// 改名不对所有人广播，避免暴露历史操作，仅在线列表响应变化
 		return
 	}
 
+	// 处理私聊命令
 	if strings.HasPrefix(lower, "to|") {
 		parts := strings.SplitN(msg, "|", 3)
 		if len(parts) != 3 || strings.TrimSpace(parts[1]) == "" || strings.TrimSpace(parts[2]) == "" {
@@ -158,7 +149,7 @@ func (this *User) DoMessage(msg string) {
 		targetName := strings.TrimSpace(parts[1])
 		content := strings.TrimSpace(parts[2])
 
-		if err := this.Server.SendPrivate(this.Name, targetName, content); err != nil {
+		if err := this.Server.SendPrivate(this.Name, targetName, content, this.Avatar); err != nil {
 			this.SendMsg(err.Error() + "\n")
 			return
 		}
@@ -167,8 +158,9 @@ func (this *User) DoMessage(msg string) {
 		return
 	}
 
+	// 处理群聊命令
 	if strings.HasPrefix(lower, "group|") {
-		parts := strings.SplitN(msg, "|", 3)
+		parts := strings.SplitN(msg, "|", 4)
 		if len(parts) < 2 {
 			this.SendMsg("群聊命令格式错误,示例:group|create|群名 或 group|join|群名 或 group|leave|群名 或 group|send|群名|消息\n")
 			return
@@ -215,7 +207,7 @@ func (this *User) DoMessage(msg string) {
 			}
 			groupName := strings.TrimSpace(parts[2])
 			content := strings.TrimSpace(parts[3])
-			if err := this.Server.BroadCastToGroup(groupName, this.Name, content); err != nil {
+			if err := this.Server.BroadCastToGroup(groupName, this.Name, content, this.Avatar); err != nil {
 				this.SendMsg(err.Error() + "\n")
 				return
 			}
@@ -246,6 +238,14 @@ func (this *User) Offline() {
 
 	fmt.Printf("[%s] 用户 %s 离线\n", time.Now().Format("2006-01-02 15:04:05"), this.Name)
 
+	// 安全关闭 channel - 避免在已关闭的 channel 上发送导致 panic
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Printf("关闭 channel 时发生 panic: %v\n", r)
+		}
+	}()
+	
+	// 清空缓冲区
 	select {
 	case <-this.C:
 	default:
@@ -255,11 +255,19 @@ func (this *User) Offline() {
 
 // 监听当前User channel的方法，一旦有消息，就直接发送给对端客户端
 func (this *User) ListenMessage() {
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Printf("ListenMessage panic: %v\n", r)
+		}
+	}()
 
 	for msg := range this.C {
+		if this.conn == nil {
+			return
+		}
 		_, err := this.conn.Write([]byte(msg + "\n"))
 		if err != nil {
-			fmt.Println("ListenMessage Write err:", err)
+			fmt.Printf("ListenMessage Write error: %v\n", err)
 			return
 		}
 	}
