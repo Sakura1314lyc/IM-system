@@ -9,6 +9,17 @@ const passwordInput = document.getElementById('password');
 const connectBtn = document.getElementById('connectBtn');
 const logoutBtn = document.getElementById('logoutBtn');
 
+const registerBtn = document.createElement('button');
+registerBtn.id = 'registerBtn';
+registerBtn.type = 'button';
+registerBtn.className = 'btn btn-secondary btn-lg';
+registerBtn.textContent = '📝 注册新用户';
+registerBtn.style.marginTop = '10px';
+registerBtn.style.width = '100%';
+
+const loginForm = document.getElementById('loginForm');
+loginForm.appendChild(registerBtn);
+
 const userAvatar = document.getElementById('userAvatar');
 const userNameDisplay = document.getElementById('userNameDisplay');
 const userStatus = document.getElementById('userStatus');
@@ -100,6 +111,40 @@ connectBtn.addEventListener('click', () => {
   connect();
 });
 
+// 注册事件
+registerBtn.addEventListener('click', async () => {
+  const name = usernameInput.value.trim();
+  const password = passwordInput.value.trim();
+  
+  if (!name || !password) {
+    alert('用户名和密码不能为空');
+    return;
+  }
+
+  if (password.length < 6) {
+    alert('密码至少需要6个字符');
+    return;
+  }
+  
+  try {
+    const response = await fetch('/api/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: name, password: password })
+    });
+
+    if (response.ok) {
+      alert('注册成功！请使用您的凭据登录。');
+    } else {
+      const error = await response.text();
+      alert('注册失败: ' + error);
+    }
+  } catch (err) {
+    console.error('注册失败:', err);
+    alert('注册失败');
+  }
+});
+
 // 连接到 SSE 服务
 function connect() {
   if (eventSource) eventSource.close();
@@ -162,6 +207,9 @@ async function refreshOnlineList() {
     
     if (data.online && data.online.length > 0) {
       data.online.forEach(user => {
+        if (user.name === currentUsername) {
+          return // 不显示自己
+        }
         const li = document.createElement('li');
         li.innerHTML = `<span>${user.avatar || '👤'}</span> ${user.name}`;
         li.title = user.name;

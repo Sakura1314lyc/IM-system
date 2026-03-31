@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -36,37 +37,50 @@ type Server struct {
 	WebClients map[string]*WebClient
 	webLock    sync.RWMutex
 
-	//用户凭据存储
-	UserCreds map[string]*UserCred
-	credLock  sync.RWMutex
+	//用户凭据存储 - 现在使用数据库
+	//UserCreds map[string]*UserCred
+	//credLock  sync.RWMutex
 
-	//群组: 群名 -> 用户列表
-	Groups    map[string][]string
-	groupLock sync.RWMutex
+	//群组: 群名 -> 用户列表 - 现在使用数据库
+	//Groups    map[string][]string
+	//groupLock sync.RWMutex
 
 	//消息广播的channel
 	Message chan string
+
+	// 数据库连接
+	DB *Database
+
+	// TLS配置
+	TLSConfig *tls.Config
 }
 
-// 创建server接口
-func Newserver(ip string, port int) *Server {
+// 创建 server 实例
+func NewServer(ip string, port int, dbPath string, enableTLS bool) *Server {
+	db, err := InitDatabase(dbPath)
+	if err != nil {
+		panic(fmt.Sprintf("Failed to initialize database: %v", err))
+	}
+
 	server := &Server{
 		Ip:         ip,
 		Port:       port,
 		OnlineMap:  make(map[string]*User),
 		WebClients: make(map[string]*WebClient),
-		UserCreds:  make(map[string]*UserCred),
-		Groups:     make(map[string][]string),
 		Message:    make(chan string),
+		DB:         db,
 	}
 
-	// 添加一些默认用户（支持头像）
-	avatars := []string{"👨‍💼", "👩‍💼", "👨‍💻"}
-	names := []string{"alice", "bob", "charlie"}
-	for i, name := range names {
-		server.UserCreds[name] = &UserCred{
-			Password: "123",
-			Avatar:   avatars[i],
+	// 如果启用TLS，生成自签名证书
+	if enableTLS {
+		cert, err := generateSelfSignedCert()
+		if err != nil {
+			fmt.Printf("Warning: Failed to generate TLS certificate: %v\n", err)
+		} else {
+			server.TLSConfig = &tls.Config{
+				Certificates: []tls.Certificate{cert},
+			}
+			fmt.Println("TLS encryption enabled")
 		}
 	}
 
@@ -75,12 +89,11 @@ func Newserver(ip string, port int) *Server {
 
 // 验证用户凭据 - 返回(是否验证成功, 用户头像)
 func (this *Server) Authenticate(username, password string) (string, bool) {
-	this.credLock.RLock()
-	defer this.credLock.RUnlock()
-	if cred, ok := this.UserCreds[username]; ok && cred.Password == password {
-		return cred.Avatar, true
+	user, err := this.DB.AuthenticateUser(username, password)
+	if err != nil {
+		return "", false
 	}
-	return "", false
+	return user.Avatar, true
 }
 
 // 原子性重命名用户 - 修复并发问题
@@ -108,46 +121,52 @@ func (this *Server) RenameUser(oldName, newName string) bool {
 
 // 注册新用户
 func (this *Server) Register(username, password string) error {
-	if strings.TrimSpace(username) == "" || strings.TrimSpace(password) == "" {
-		return fmt.Errorf("用户名和密码不能为空")
-	}
-	if len(username) > 20 || len(password) > 50 {
-		return fmt.Errorf("用户名或密码过长")
-	}
-	this.credLock.Lock()
-	defer this.credLock.Unlock()
-	if _, exists := this.UserCreds[username]; exists {
-		return fmt.Errorf("用户名已存在")
-	}
-	this.UserCreds[username] = &UserCred{
-		Password: password,
-		Avatar:   "👤", // 默认头像
-	}
-	return nil
+	return this.DB.RegisterUser(username, password, "👤")
 }
 
 // 群聊广播
 func (this *Server) BroadCastToGroup(groupName, from, msg, avatar string) error {
 	msg = sanitizeInput(msg)
-	this.groupLock.RLock()
-	members, exists := this.Groups[groupName]
-	this.groupLock.RUnlock()
-	if !exists {
-		return fmt.Errorf("群组不存在")
+
+	fromUser, err := this.DB.GetUserByUsername(from)
+	if err != nil {
+		return fmt.Errorf("发送者不存在: %v", err)
+	}
+
+	members, err := this.DB.GetGroupMembers(groupName)
+	if err != nil {
+		return fmt.Errorf("获取群组成员失败: %v", err)
+	}
+
+	if len(members) == 0 {
+		return fmt.Errorf("群组不存在或没有成员")
+	}
+
+	// 获取群组ID
+	var groupID int
+	err = this.DB.db.QueryRow("SELECT id FROM groups WHERE name = ?", groupName).Scan(&groupID)
+	if err != nil {
+		return fmt.Errorf("获取群组ID失败: %v", err)
 	}
 
 	sendMsg := fmt.Sprintf("[群聊 %s] %s %s: %s", groupName, avatar, from, msg)
 	fmt.Printf("[%s] Group broadcast to %s from %s: %s\n", time.Now().Format("2006-01-02 15:04:05"), groupName, from, msg)
 
+	// 保存消息到数据库
+	_, err = this.DB.SaveMessage(fromUser.ID, nil, &groupID, msg, "group")
+	if err != nil {
+		fmt.Printf("Warning: Failed to save group message: %v\n", err)
+	}
+
 	for _, member := range members {
 		this.mapLock.RLock()
-		if user, ok := this.OnlineMap[member]; ok {
+		if user, ok := this.OnlineMap[member.Username]; ok {
 			user.SendMsg(sendMsg + "\n")
 		}
 		this.mapLock.RUnlock()
 
 		this.webLock.RLock()
-		if client, ok := this.WebClients[member]; ok {
+		if client, ok := this.WebClients[member.Username]; ok {
 			select {
 			case client.C <- sendMsg:
 			default:
@@ -172,47 +191,33 @@ func sanitizeInput(input string) string {
 
 // 创建群组
 func (this *Server) CreateGroup(groupName, creator string) error {
-	this.groupLock.Lock()
-	defer this.groupLock.Unlock()
-	if _, exists := this.Groups[groupName]; exists {
-		return fmt.Errorf("群组已存在")
+	creatorUser, err := this.DB.GetUserByUsername(creator)
+	if err != nil {
+		return fmt.Errorf("用户不存在: %v", err)
 	}
-	this.Groups[groupName] = []string{creator}
-	return nil
+
+	_, err = this.DB.CreateGroup(groupName, creatorUser.ID, "")
+	return err
 }
 
 // 加入群组
 func (this *Server) JoinGroup(groupName, user string) error {
-	this.groupLock.Lock()
-	defer this.groupLock.Unlock()
-	members, exists := this.Groups[groupName]
-	if !exists {
-		return fmt.Errorf("群组不存在")
+	userObj, err := this.DB.GetUserByUsername(user)
+	if err != nil {
+		return fmt.Errorf("用户不存在: %v", err)
 	}
-	for _, m := range members {
-		if m == user {
-			return fmt.Errorf("已在群组中")
-		}
-	}
-	this.Groups[groupName] = append(members, user)
-	return nil
+
+	return this.DB.JoinGroup(groupName, userObj.ID)
 }
 
 // 离开群组
 func (this *Server) LeaveGroup(groupName, user string) error {
-	this.groupLock.Lock()
-	defer this.groupLock.Unlock()
-	members, exists := this.Groups[groupName]
-	if !exists {
-		return fmt.Errorf("群组不存在")
+	userObj, err := this.DB.GetUserByUsername(user)
+	if err != nil {
+		return fmt.Errorf("用户不存在: %v", err)
 	}
-	for i, m := range members {
-		if m == user {
-			this.Groups[groupName] = append(members[:i], members[i+1:]...)
-			return nil
-		}
-	}
-	return fmt.Errorf("不在群组中")
+
+	return this.DB.LeaveGroup(groupName, userObj.ID)
 }
 
 // 广播消息的方法
@@ -220,6 +225,16 @@ func (this *Server) BroadCast(user *User, msg string) {
 	msg = sanitizeInput(msg)
 	sendMsg := "[" + user.Addr + "] " + user.Avatar + " " + user.Name + ": " + msg
 	fmt.Printf("[%s] Broadcast from %s(%s): %s\n", time.Now().Format("2006-01-02 15:04:05"), user.Name, user.Addr, msg)
+
+	// 保存消息到数据库
+	fromUser, err := this.DB.GetUserByUsername(user.Name)
+	if err == nil {
+		_, err = this.DB.SaveMessage(fromUser.ID, nil, nil, msg, "public")
+		if err != nil {
+			fmt.Printf("Warning: Failed to save public message: %v\n", err)
+		}
+	}
+
 	this.Message <- sendMsg
 }
 
@@ -306,6 +321,23 @@ func (this *Server) RenameWebClient(oldName, newName string) error {
 
 func (this *Server) SendPrivate(from, to, content, avatar string) error {
 	content = sanitizeInput(content)
+
+	fromUser, err := this.DB.GetUserByUsername(from)
+	if err != nil {
+		return fmt.Errorf("发送者不存在: %v", err)
+	}
+
+	toUser, err := this.DB.GetUserByUsername(to)
+	if err != nil {
+		return fmt.Errorf("接收者不存在: %v", err)
+	}
+
+	// 保存消息到数据库
+	_, err = this.DB.SaveMessage(fromUser.ID, &toUser.ID, nil, content, "private")
+	if err != nil {
+		fmt.Printf("Warning: Failed to save private message: %v\n", err)
+	}
+
 	this.mapLock.RLock()
 	if user, ok := this.OnlineMap[to]; ok {
 		user.SendMsg("[私聊] " + avatar + " " + from + ": " + content + "\n")
@@ -572,6 +604,34 @@ func (this *Server) handleRename(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (this *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "只支持 POST", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var data struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
+		http.Error(w, "请求体解析失败", http.StatusBadRequest)
+		return
+	}
+
+	if strings.TrimSpace(data.Username) == "" || strings.TrimSpace(data.Password) == "" {
+		http.Error(w, "用户名和密码不能为空", http.StatusBadRequest)
+		return
+	}
+
+	if err := this.Register(data.Username, data.Password); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+}
+
 func (this *Server) StartWeb(addr string) {
 	mux := http.NewServeMux()
 	mux.Handle("/", http.FileServer(http.Dir("./web")))
@@ -579,6 +639,7 @@ func (this *Server) StartWeb(addr string) {
 	mux.HandleFunc("/api/online", this.handleOnline)
 	mux.HandleFunc("/api/send", this.handleSend)
 	mux.HandleFunc("/api/rename", this.handleRename)
+	mux.HandleFunc("/api/register", this.handleRegister)
 
 	fmt.Printf("[%s] Web UI 服务启动 %s\n", time.Now().Format("2006-01-02 15:04:05"), addr)
 	if err := http.ListenAndServe(addr, mux); err != nil {
@@ -589,11 +650,25 @@ func (this *Server) StartWeb(addr string) {
 // 启动服务器的接口
 func (this *Server) Start() {
 	//socket listen
-	listener, err := net.Listen("tcp", fmt.Sprintf("%s:%d", this.Ip, this.Port))
-	if err != nil {
-		fmt.Println("net.Listen err:", err)
-		return
+	var listener net.Listener
+	var err error
+
+	if this.TLSConfig != nil {
+		listener, err = tls.Listen("tcp", fmt.Sprintf("%s:%d", this.Ip, this.Port), this.TLSConfig)
+		if err != nil {
+			fmt.Println("TLS net.Listen err:", err)
+			return
+		}
+		fmt.Printf("TLS TCP server listening on %s:%d\n", this.Ip, this.Port)
+	} else {
+		listener, err = net.Listen("tcp", fmt.Sprintf("%s:%d", this.Ip, this.Port))
+		if err != nil {
+			fmt.Println("net.Listen err:", err)
+			return
+		}
+		fmt.Printf("TCP server listening on %s:%d\n", this.Ip, this.Port)
 	}
+
 	//close listen socket
 	defer listener.Close()
 

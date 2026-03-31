@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"net"
 	"strings"
@@ -40,9 +39,14 @@ func NewUser(conn net.Conn, server *Server) *User {
 
 // 用户上线的业务
 func (this *User) Online() {
-
-	//用户上线 将用户加入到onlineMap中
 	this.Server.mapLock.Lock()
+	// 清理旧的重复映射（例如先用地址上线，然后登录时会改名）
+	for key, user := range this.Server.OnlineMap {
+		if user == this && key != this.Name {
+			delete(this.Server.OnlineMap, key)
+		}
+	}
+
 	this.Server.OnlineMap[this.Name] = this
 	this.Server.mapLock.Unlock()
 
@@ -64,19 +68,6 @@ func (this *User) SendMsg(msg string) {
 	}
 }
 
-// 用户上线的业务
-func (this *User) Online() {
-	//用户上线 将用户加入到onlineMap中
-	this.Server.mapLock.Lock()
-	this.Server.OnlineMap[this.Name] = this
-	this.Server.mapLock.Unlock()
-
-	fmt.Printf("[%s] 用户 %s(%s) 上线\n", time.Now().Format("2006-01-02 15:04:05"), this.Name, this.Addr)
-
-	//广播当前用户上线消息
-	this.Server.BroadCast(this, "已上线")
-}
-
 // 用户处理消息的业务
 func (this *User) DoMessage(msg string) {
 	if !this.IsAuthenticated {
@@ -89,7 +80,13 @@ func (this *User) DoMessage(msg string) {
 			username := strings.TrimSpace(parts[1])
 			password := strings.TrimSpace(parts[2])
 			if avatar, ok := this.Server.Authenticate(username, password); ok {
-				this.Name = username
+				if this.Name != username {
+					if !this.Server.RenameUser(this.Name, username) {
+						this.SendMsg("登录失败：用户名已被占用\n")
+						return
+					}
+					this.Name = username
+				}
 				this.Avatar = avatar
 				this.IsAuthenticated = true
 				this.Online()
@@ -97,8 +94,21 @@ func (this *User) DoMessage(msg string) {
 			} else {
 				this.SendMsg("用户名或密码错误\n")
 			}
+		} else if strings.HasPrefix(msg, "register|") {
+			parts := strings.Split(msg, "|")
+			if len(parts) != 3 {
+				this.SendMsg("注册格式错误,示例:register|username|password\n")
+				return
+			}
+			username := strings.TrimSpace(parts[1])
+			password := strings.TrimSpace(parts[2])
+			if err := this.Server.Register(username, password); err != nil {
+				this.SendMsg("注册失败: " + err.Error() + "\n")
+			} else {
+				this.SendMsg("注册成功，请使用 login|username|password 登录\n")
+			}
 		} else {
-			this.SendMsg("请先登录,格式:login|username|password\n")
+			this.SendMsg("请先登录或注册,格式:login|username|password 或 register|username|password\n")
 		}
 		return
 	}
@@ -107,9 +117,12 @@ func (this *User) DoMessage(msg string) {
 	lower := strings.ToLower(msg)
 
 	if lower == "who" {
-		// 查询当前有哪些在线用户
+		// 查询当前有哪些在线用户（不包含自己）
 		this.Server.mapLock.RLock()
 		for _, user := range this.Server.OnlineMap {
+			if user.Name == this.Name {
+				continue
+			}
 			onlineMsg := "[" + user.Addr + "]" + user.Name + ":" + "在线...\n"
 			this.SendMsg(onlineMsg)
 		}
@@ -223,9 +236,10 @@ func (this *User) DoMessage(msg string) {
 // 用户下线的业务
 func (this *User) Offline() {
 	this.Server.mapLock.Lock()
-	_, ok := this.Server.OnlineMap[this.Name]
-	if ok {
-		delete(this.Server.OnlineMap, this.Name)
+	for key, user := range this.Server.OnlineMap {
+		if user == this {
+			delete(this.Server.OnlineMap, key)
+		}
 	}
 	this.Server.mapLock.Unlock()
 
@@ -244,7 +258,7 @@ func (this *User) Offline() {
 			fmt.Printf("关闭 channel 时发生 panic: %v\n", r)
 		}
 	}()
-	
+
 	// 清空缓冲区
 	select {
 	case <-this.C:
