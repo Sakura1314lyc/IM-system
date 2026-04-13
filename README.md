@@ -26,10 +26,11 @@
 - ✅ 修改用户名（`rename|新用户名`）。
 - ✅ 服务端空闲超时踢出（10 分钟无消息）。
 - ✅ 基于 `goroutine + channel` 的并发消息处理。
-- ✅ 用户认证（用户名/密码登录，支持注册）。
+- ✅ 用户认证（用户名/密码登录，支持注册、Web登录令牌）。
+- ✅ 自定义头像上传（支持 JPG/PNG/GIF 图片，自动转换为 base64 存储）。
 - ✅ 输入验证与安全过滤。
 - ✅ 群聊功能（创建、加入、离开群，群消息广播）。
-- ✅ Web UI 支持公聊、私聊、群聊模式。
+- ✅ Web UI 支持公聊、私聊、群聊模式，并可加载历史消息。
 - ✅ SQLite数据库持久化（用户、群组、消息历史）。
 - ✅ 密码安全哈希（bcrypt）。
 
@@ -148,13 +149,13 @@ group|send|mygroup|hello everyone
 ## 运行示例（建议验证流程）
 
 1. 启动服务端。
-2. 启动两个客户端 A、B。
-3. A 登录为 `alice`，B 登录为 `bob`。
-4. A 改名为 `alice`，B 改名为 `bob`。
-5. A 在公聊发送消息，确认 B 能收到。
-6. B 使用私聊给 A 发送消息，确认 A 能收到。
-7. A 创建群 `testgroup`，B 加入群，A 在群里发消息，确认 B 收到。
-8. 在任一客户端发送 `who`，确认能看到在线用户列表。
+2. 打开浏览器访问 `http://127.0.0.1:8080/`。
+3. 注册新用户或使用默认用户登录（默认用户：alice/bob/charlie，密码：123）。
+4. 在 Web UI 中选择公聊、私聊或群聊模式。
+5. 使用“加载历史”按钮回溯公聊、私聊或群聊消息历史。
+6. 注册后可在设置界面选择并保存头像。
+7. 创建群组、加入群组，并通过群聊发送消息。
+8. 在命令行客户端中也可登录到同一服务，与 Web 用户互通。
 
 ## 并发与实现说明
 
@@ -187,8 +188,8 @@ group|send|mygroup|hello everyone
 当前仓库定位为学习示例，可按需扩展：
 
 - [ ] 增加消息持久化（MySQL / Redis / Kafka 等）。
-- [ ] 增加认证鉴权（token / JWT）。
-- [ ] 增加房间（群组）与历史消息拉取。
+- [ ] 增加更完整的单元测试与集成测试覆盖。
+- [ ] 支持更多前端主题和动画特效。
 - [ ] 提升协议鲁棒性（粘包拆包、统一序列化格式，如 JSON/Protobuf）。
 - [ ] 完善单元测试与集成测试。
 
@@ -197,10 +198,14 @@ group|send|mygroup|hello everyone
 
 新的 `main.go` 已集成 Web API + SSE，前端可直接与后端交互：
 
-- `GET /api/events?name=<昵称>`：SSE 实时接收消息
+- `GET /api/events?token=<token>`：SSE 实时接收消息
 - `GET /api/online`：获取当前在线用户列表
-- `POST /api/send`：发送消息（支持公聊/私聊）
+- `POST /api/send`：发送消息（支持公聊/私聊/群聊）
 - `POST /api/rename`：修改昵称
+- `POST /api/avatar`：更新当前用户头像
+- `GET /api/groups?token=<token>`：获取当前用户群组列表
+- `POST /api/group`：创建/加入/离开群组
+- `GET /api/history?token=<token>&type=<public|private|group>&peer=<user>&group=<group>`：加载聊天历史
 
 静态页面已被放在 `web/` 目录：
 
@@ -212,8 +217,8 @@ group|send|mygroup|hello everyone
 
 1. 运行服务：`go run main.go server.go user.go`
 2. 打开浏览器：`http://127.0.0.1:8080/`
-3. 在“昵称”输入框设置用户名，点击“修改”。
-4. 切换公聊/私聊，输入消息发送。
+3. 在 Web 登录页面输入用户名、密码，并选择头像。
+4. 登录后即可切换公聊/私聊/群聊，并使用“加载历史”按钮查看历史记录。
 
 > 注：TCP CLI 用户（`go run ./cmd/client/main.go`）与 Web UI 用户可混合在线互通。
 

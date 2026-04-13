@@ -1,7 +1,9 @@
 package main
 
 import (
+	"crypto/rand"
 	"crypto/tls"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -37,13 +39,9 @@ type Server struct {
 	WebClients map[string]*WebClient
 	webLock    sync.RWMutex
 
-	//用户凭据存储 - 现在使用数据库
-	//UserCreds map[string]*UserCred
-	//credLock  sync.RWMutex
-
-	//群组: 群名 -> 用户列表 - 现在使用数据库
-	//Groups    map[string][]string
-	//groupLock sync.RWMutex
+	// Web 登录会话 token
+	SessionTokens map[string]string
+	sessionLock   sync.RWMutex
 
 	//消息广播的channel
 	Message chan string
@@ -63,12 +61,13 @@ func NewServer(ip string, port int, dbPath string, enableTLS bool) *Server {
 	}
 
 	server := &Server{
-		Ip:         ip,
-		Port:       port,
-		OnlineMap:  make(map[string]*User),
-		WebClients: make(map[string]*WebClient),
-		Message:    make(chan string),
-		DB:         db,
+		Ip:            ip,
+		Port:          port,
+		OnlineMap:     make(map[string]*User),
+		WebClients:    make(map[string]*WebClient),
+		SessionTokens: make(map[string]string),
+		Message:       make(chan string),
+		DB:            db,
 	}
 
 	// 如果启用TLS，生成自签名证书
@@ -96,6 +95,46 @@ func (this *Server) Authenticate(username, password string) (string, bool) {
 	return user.Avatar, true
 }
 
+func (this *Server) generateToken() (string, error) {
+	b := make([]byte, 16)
+	if _, err := rand.Read(b); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(b), nil
+}
+
+func (this *Server) CreateSession(username string) (string, error) {
+	token, err := this.generateToken()
+	if err != nil {
+		return "", err
+	}
+	this.sessionLock.Lock()
+	defer this.sessionLock.Unlock()
+	this.SessionTokens[token] = username
+	return token, nil
+}
+
+func (this *Server) GetUsernameByToken(token string) (string, bool) {
+	this.sessionLock.RLock()
+	defer this.sessionLock.RUnlock()
+	username, ok := this.SessionTokens[token]
+	return username, ok
+}
+
+func (this *Server) UpdateSessionUsername(token, username string) {
+	this.sessionLock.Lock()
+	defer this.sessionLock.Unlock()
+	if _, ok := this.SessionTokens[token]; ok {
+		this.SessionTokens[token] = username
+	}
+}
+
+func (this *Server) DeleteSession(token string) {
+	this.sessionLock.Lock()
+	defer this.sessionLock.Unlock()
+	delete(this.SessionTokens, token)
+}
+
 // 原子性重命名用户 - 修复并发问题
 func (this *Server) RenameUser(oldName, newName string) bool {
 	this.mapLock.Lock()
@@ -120,8 +159,15 @@ func (this *Server) RenameUser(oldName, newName string) bool {
 }
 
 // 注册新用户
-func (this *Server) Register(username, password string) error {
-	return this.DB.RegisterUser(username, password, "👤")
+func (this *Server) Register(username, password, avatar string) error {
+	if avatar == "" {
+		avatar = "👤"
+	}
+	return this.DB.RegisterUser(username, password, avatar)
+}
+
+func (this *Server) UpdateAvatar(username, avatar string) error {
+	return this.DB.UpdateUserAvatar(username, avatar)
 }
 
 // 群聊广播
@@ -261,23 +307,30 @@ func (this *Server) RemoveWebClient(name string) {
 }
 
 func (this *Server) GetOnlineUsers() []map[string]string {
+	seen := make(map[string]bool)
 	users := make([]map[string]string, 0)
 
 	this.mapLock.RLock()
 	for _, u := range this.OnlineMap {
-		users = append(users, map[string]string{
-			"name":   u.Name,
-			"avatar": u.Avatar,
-		})
+		if !seen[u.Name] {
+			seen[u.Name] = true
+			users = append(users, map[string]string{
+				"name":   u.Name,
+				"avatar": u.Avatar,
+			})
+		}
 	}
 	this.mapLock.RUnlock()
 
 	this.webLock.RLock()
 	for name, client := range this.WebClients {
-		users = append(users, map[string]string{
-			"name":   name,
-			"avatar": client.Avatar,
-		})
+		if !seen[name] {
+			seen[name] = true
+			users = append(users, map[string]string{
+				"name":   name,
+				"avatar": client.Avatar,
+			})
+		}
 	}
 	this.webLock.RUnlock()
 
@@ -301,12 +354,12 @@ func (this *Server) IsNameTaken(name string) bool {
 }
 
 func (this *Server) RenameWebClient(oldName, newName string) error {
-	this.webLock.Lock()
-	defer this.webLock.Unlock()
-
-	if _, exists := this.WebClients[newName]; exists {
+	if this.IsNameTaken(newName) {
 		return fmt.Errorf("用户名已被占用")
 	}
+
+	this.webLock.Lock()
+	defer this.webLock.Unlock()
 
 	client, ok := this.WebClients[oldName]
 	if !ok {
@@ -348,7 +401,11 @@ func (this *Server) SendPrivate(from, to, content, avatar string) error {
 
 	this.webLock.RLock()
 	if client, ok := this.WebClients[to]; ok {
-		client.C <- "[私聊] " + avatar + " " + from + ": " + content
+		select {
+		case client.C <- "[私聊] " + avatar + " " + from + ": " + content:
+		default:
+			fmt.Printf("Warning: web client %s message queue full, skip private message\n", to)
+		}
 		this.webLock.RUnlock()
 		return nil
 	}
@@ -452,22 +509,89 @@ func (this *Server) Handler(conn net.Conn) {
 	}
 }
 
-func (this *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
-	name := r.URL.Query().Get("name")
-	password := r.URL.Query().Get("password")
-	if name == "" || password == "" {
-		http.Error(w, "缺少用户名或密码参数", http.StatusBadRequest)
+func (this *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "只支持 POST", http.StatusMethodNotAllowed)
 		return
 	}
 
-	avatar, ok := this.Authenticate(name, password)
+	var data struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
+		http.Error(w, "请求体解析失败", http.StatusBadRequest)
+		return
+	}
+
+	if strings.TrimSpace(data.Username) == "" || strings.TrimSpace(data.Password) == "" {
+		http.Error(w, "用户名和密码不能为空", http.StatusBadRequest)
+		return
+	}
+
+	avatar, ok := this.Authenticate(data.Username, data.Password)
 	if !ok {
 		http.Error(w, "认证失败", http.StatusUnauthorized)
 		return
 	}
 
-	if this.IsNameTaken(name) {
-		// 重名允许同名从旧连接替换
+	token, err := this.CreateSession(data.Username)
+	if err != nil {
+		http.Error(w, "生成会话失败", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"token": token, "avatar": avatar})
+}
+
+func (this *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "只支持 POST", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var data struct {
+		Token string `json:"token"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
+		http.Error(w, "请求体解析失败", http.StatusBadRequest)
+		return
+	}
+
+	if strings.TrimSpace(data.Token) == "" {
+		http.Error(w, "token 不能为空", http.StatusBadRequest)
+		return
+	}
+
+	this.DeleteSession(data.Token)
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (this *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
+	token := r.URL.Query().Get("token")
+	if strings.TrimSpace(token) == "" {
+		http.Error(w, "缺少登录 token", http.StatusBadRequest)
+		return
+	}
+
+	name, ok := this.GetUsernameByToken(token)
+	if !ok {
+		http.Error(w, "认证失败", http.StatusUnauthorized)
+		return
+	}
+
+	userInfo, err := this.DB.GetUserByUsername(name)
+	if err != nil {
+		http.Error(w, "用户信息读取失败", http.StatusUnauthorized)
+		return
+	}
+
+	this.webLock.RLock()
+	_, exists := this.WebClients[name]
+	this.webLock.RUnlock()
+	if exists {
+		this.RemoveWebClient(name)
 	}
 
 	w.Header().Set("Content-Type", "text/event-stream")
@@ -479,7 +603,7 @@ func (this *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	client := &WebClient{Name: name, C: make(chan string, 100), Avatar: avatar}
+	client := &WebClient{Name: name, C: make(chan string, 100), Avatar: userInfo.Avatar}
 	this.AddWebClient(client)
 	defer this.RemoveWebClient(name)
 
@@ -515,6 +639,7 @@ func (this *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var data struct {
+		Token   string `json:"token"`
 		Name    string `json:"name"`
 		To      string `json:"to"`
 		Message string `json:"message"`
@@ -526,8 +651,14 @@ func (this *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if strings.TrimSpace(data.Name) == "" || strings.TrimSpace(data.Message) == "" {
-		http.Error(w, "name 和 message 不能为空", http.StatusBadRequest)
+	if strings.TrimSpace(data.Token) == "" || strings.TrimSpace(data.Message) == "" {
+		http.Error(w, "token 和 message 不能为空", http.StatusBadRequest)
+		return
+	}
+
+	name, ok := this.GetUsernameByToken(data.Token)
+	if !ok {
+		http.Error(w, "认证失败", http.StatusUnauthorized)
 		return
 	}
 
@@ -541,16 +672,15 @@ func (this *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 获取发送者头像
 	avatar := ""
 	this.webLock.RLock()
-	if client, ok := this.WebClients[data.Name]; ok {
+	if client, ok := this.WebClients[name]; ok {
 		avatar = client.Avatar
 	}
 	this.webLock.RUnlock()
 
 	if data.Mode == "private" {
-		if err := this.SendPrivate(data.Name, data.To, data.Message, avatar); err != nil {
+		if err := this.SendPrivate(name, data.To, data.Message, avatar); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -559,7 +689,7 @@ func (this *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if data.Mode == "group" {
-		if err := this.BroadCastToGroup(data.To, data.Name, data.Message, avatar); err != nil {
+		if err := this.BroadCastToGroup(data.To, name, data.Message, avatar); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -567,8 +697,94 @@ func (this *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	this.BroadCastFromWeb(data.Name, data.Message, avatar)
+	this.BroadCastFromWeb(name, data.Message, avatar)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (this *Server) handleAvatar(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "只支持 POST", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var data struct {
+		Token  string `json:"token"`
+		Avatar string `json:"avatar"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
+		http.Error(w, "请求体解析失败", http.StatusBadRequest)
+		return
+	}
+
+	if strings.TrimSpace(data.Token) == "" || strings.TrimSpace(data.Avatar) == "" {
+		http.Error(w, "token 和 avatar 不能为空", http.StatusBadRequest)
+		return
+	}
+
+	username, ok := this.GetUsernameByToken(data.Token)
+	if !ok {
+		http.Error(w, "认证失败", http.StatusUnauthorized)
+		return
+	}
+
+	if err := this.UpdateAvatar(username, data.Avatar); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (this *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "只支持 GET", http.StatusMethodNotAllowed)
+		return
+	}
+
+	token := r.URL.Query().Get("token")
+	if strings.TrimSpace(token) == "" {
+		http.Error(w, "缺少登录 token", http.StatusBadRequest)
+		return
+	}
+
+	username, ok := this.GetUsernameByToken(token)
+	if !ok {
+		http.Error(w, "认证失败", http.StatusUnauthorized)
+		return
+	}
+
+	typeResp := r.URL.Query().Get("type")
+	groupName := r.URL.Query().Get("group")
+	limit := 50
+
+	var history interface{}
+	var err error
+
+	switch typeResp {
+	case "group":
+		if strings.TrimSpace(groupName) == "" {
+			http.Error(w, "缺少 group 参数", http.StatusBadRequest)
+			return
+		}
+		history, err = this.DB.GetGroupMessages(groupName, limit)
+	case "private":
+		peer := r.URL.Query().Get("peer")
+		if strings.TrimSpace(peer) == "" {
+			http.Error(w, "缺少 peer 参数", http.StatusBadRequest)
+			return
+		}
+		history, err = this.DB.GetPrivateMessages(username, peer, limit)
+	default:
+		history, err = this.DB.GetPublicMessages(limit)
+	}
+
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"history": history})
 }
 
 func (this *Server) handleRename(w http.ResponseWriter, r *http.Request) {
@@ -578,16 +794,22 @@ func (this *Server) handleRename(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var data struct {
-		Old string `json:"old"`
-		New string `json:"new"`
+		Token string `json:"token"`
+		New   string `json:"new"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
 		http.Error(w, "请求体解析失败", http.StatusBadRequest)
 		return
 	}
 
-	if strings.TrimSpace(data.Old) == "" || strings.TrimSpace(data.New) == "" {
-		http.Error(w, "old/new 不能为空", http.StatusBadRequest)
+	if strings.TrimSpace(data.Token) == "" || strings.TrimSpace(data.New) == "" {
+		http.Error(w, "token/new 不能为空", http.StatusBadRequest)
+		return
+	}
+
+	username, ok := this.GetUsernameByToken(data.Token)
+	if !ok {
+		http.Error(w, "认证失败", http.StatusUnauthorized)
 		return
 	}
 
@@ -596,11 +818,12 @@ func (this *Server) handleRename(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := this.RenameWebClient(data.Old, data.New); err != nil {
+	if err := this.RenameWebClient(username, data.New); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
+	this.UpdateSessionUsername(data.Token, data.New)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -613,6 +836,7 @@ func (this *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	var data struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
+		Avatar   string `json:"avatar"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
 		http.Error(w, "请求体解析失败", http.StatusBadRequest)
@@ -624,7 +848,7 @@ func (this *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := this.Register(data.Username, data.Password); err != nil {
+	if err := this.Register(data.Username, data.Password, data.Avatar); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -632,14 +856,105 @@ func (this *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusCreated)
 }
 
+func (this *Server) handleGroup(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "只支持 POST", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var data struct {
+		Token     string `json:"token"`
+		Action    string `json:"action"`
+		GroupName string `json:"groupName"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
+		http.Error(w, "请求体解析失败", http.StatusBadRequest)
+		return
+	}
+
+	if strings.TrimSpace(data.Token) == "" || strings.TrimSpace(data.Action) == "" || strings.TrimSpace(data.GroupName) == "" {
+		http.Error(w, "token、action 和 groupName 不能为空", http.StatusBadRequest)
+		return
+	}
+
+	username, ok := this.GetUsernameByToken(data.Token)
+	if !ok {
+		http.Error(w, "认证失败", http.StatusUnauthorized)
+		return
+	}
+
+	user, err := this.DB.GetUserByUsername(username)
+	if err != nil {
+		http.Error(w, "用户信息读取失败", http.StatusInternalServerError)
+		return
+	}
+
+	switch data.Action {
+	case "create":
+		if _, err := this.DB.CreateGroup(data.GroupName, user.ID, ""); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+	case "join":
+		if err := this.DB.JoinGroup(data.GroupName, user.ID); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+	case "leave":
+		if err := this.DB.LeaveGroup(data.GroupName, user.ID); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+	default:
+		http.Error(w, "未知 action", http.StatusBadRequest)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (this *Server) handleGroups(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "只支持 GET", http.StatusMethodNotAllowed)
+		return
+	}
+
+	token := r.URL.Query().Get("token")
+	if strings.TrimSpace(token) == "" {
+		http.Error(w, "缺少登录 token", http.StatusBadRequest)
+		return
+	}
+
+	username, ok := this.GetUsernameByToken(token)
+	if !ok {
+		http.Error(w, "认证失败", http.StatusUnauthorized)
+		return
+	}
+
+	groups, err := this.DB.GetUserGroups(username)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"groups": groups})
+}
+
 func (this *Server) StartWeb(addr string) {
 	mux := http.NewServeMux()
 	mux.Handle("/", http.FileServer(http.Dir("./web")))
+	mux.HandleFunc("/api/login", this.handleLogin)
+	mux.HandleFunc("/api/logout", this.handleLogout)
 	mux.HandleFunc("/api/events", this.handleEvents)
 	mux.HandleFunc("/api/online", this.handleOnline)
 	mux.HandleFunc("/api/send", this.handleSend)
 	mux.HandleFunc("/api/rename", this.handleRename)
 	mux.HandleFunc("/api/register", this.handleRegister)
+	mux.HandleFunc("/api/avatar", this.handleAvatar)
+	mux.HandleFunc("/api/group", this.handleGroup)
+	mux.HandleFunc("/api/groups", this.handleGroups)
+	mux.HandleFunc("/api/history", this.handleHistory)
 
 	fmt.Printf("[%s] Web UI 服务启动 %s\n", time.Now().Format("2006-01-02 15:04:05"), addr)
 	if err := http.ListenAndServe(addr, mux); err != nil {

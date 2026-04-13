@@ -47,6 +47,16 @@ type DBMessage struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+type DBMessageExt struct {
+	ID        int       `json:"id"`
+	From      string    `json:"from"`
+	To        string    `json:"to,omitempty"`
+	Group     string    `json:"group,omitempty"`
+	Content   string    `json:"content"`
+	Type      string    `json:"type"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
 func InitDatabase(dbPath string) (*Database, error) {
 	db, err := sql.Open("sqlite3", dbPath)
 	if err != nil {
@@ -356,6 +366,130 @@ func (d *Database) GetGroupMembers(groupName string) ([]*DBUser, error) {
 	}
 
 	return members, nil
+}
+
+func (d *Database) GetGroupByName(name string) (*DBGroup, error) {
+	var group DBGroup
+	err := d.db.QueryRow(`
+		SELECT id, name, creator_id, description, created_at
+		FROM groups WHERE name = ?`, name).
+		Scan(&group.ID, &group.Name, &group.CreatorID, &group.Description, &group.CreatedAt)
+	if err == sql.ErrNoRows {
+		return nil, fmt.Errorf("group not found")
+	}
+	if err != nil {
+		return nil, fmt.Errorf("database error: %v", err)
+	}
+	return &group, nil
+}
+
+func (d *Database) GetUserGroups(username string) ([]string, error) {
+	rows, err := d.db.Query(`
+		SELECT g.name
+		FROM groups g
+		JOIN group_members gm ON g.id = gm.group_id
+		JOIN users u ON gm.user_id = u.id
+		WHERE u.username = ?`, username)
+	if err != nil {
+		return nil, fmt.Errorf("database error: %v", err)
+	}
+	defer rows.Close()
+
+	var groups []string
+	for rows.Next() {
+		var groupName string
+		if err := rows.Scan(&groupName); err != nil {
+			return nil, fmt.Errorf("failed to scan group name: %v", err)
+		}
+		groups = append(groups, groupName)
+	}
+
+	return groups, nil
+}
+
+func (d *Database) UpdateUserAvatar(username, avatar string) error {
+	_, err := d.db.Exec(`UPDATE users SET avatar = ? WHERE username = ?`, avatar, username)
+	if err != nil {
+		return fmt.Errorf("failed to update avatar: %v", err)
+	}
+	return nil
+}
+
+func (d *Database) GetPublicMessages(limit int) ([]*DBMessageExt, error) {
+	rows, err := d.db.Query(`
+		SELECT m.id, u.username, '', '', m.content, m.type, m.created_at
+		FROM messages m
+		JOIN users u ON m.from_id = u.id
+		WHERE m.type = 'public'
+		ORDER BY m.created_at DESC
+		LIMIT ?`, limit)
+	if err != nil {
+		return nil, fmt.Errorf("database error: %v", err)
+	}
+	defer rows.Close()
+
+	var messages []*DBMessageExt
+	for rows.Next() {
+		var msg DBMessageExt
+		if err := rows.Scan(&msg.ID, &msg.From, &msg.To, &msg.Group, &msg.Content, &msg.Type, &msg.CreatedAt); err != nil {
+			return nil, fmt.Errorf("failed to scan message: %v", err)
+		}
+		messages = append(messages, &msg)
+	}
+
+	return messages, nil
+}
+
+func (d *Database) GetGroupMessages(groupName string, limit int) ([]*DBMessageExt, error) {
+	rows, err := d.db.Query(`
+		SELECT m.id, u.username, '', g.name, m.content, m.type, m.created_at
+		FROM messages m
+		JOIN users u ON m.from_id = u.id
+		JOIN groups g ON m.group_id = g.id
+		WHERE m.type = 'group' AND g.name = ?
+		ORDER BY m.created_at DESC
+		LIMIT ?`, groupName, limit)
+	if err != nil {
+		return nil, fmt.Errorf("database error: %v", err)
+	}
+	defer rows.Close()
+
+	var messages []*DBMessageExt
+	for rows.Next() {
+		var msg DBMessageExt
+		if err := rows.Scan(&msg.ID, &msg.From, &msg.To, &msg.Group, &msg.Content, &msg.Type, &msg.CreatedAt); err != nil {
+			return nil, fmt.Errorf("failed to scan message: %v", err)
+		}
+		messages = append(messages, &msg)
+	}
+
+	return messages, nil
+}
+
+func (d *Database) GetPrivateMessages(username, peer string, limit int) ([]*DBMessageExt, error) {
+	rows, err := d.db.Query(`
+		SELECT m.id, u.username, u2.username, NULL, m.content, m.type, m.created_at
+		FROM messages m
+		JOIN users u ON m.from_id = u.id
+		JOIN users u2 ON m.to_id = u2.id
+		WHERE m.type = 'private' AND ((u.username = ? AND u2.username = ?) OR (u.username = ? AND u2.username = ?))
+		ORDER BY m.created_at DESC
+		LIMIT ?`, username, peer, peer, username, limit)
+	if err != nil {
+		return nil, fmt.Errorf("database error: %v", err)
+	}
+	defer rows.Close()
+
+	var messages []*DBMessageExt
+	for rows.Next() {
+		var msg DBMessageExt
+		if err := rows.Scan(&msg.ID, &msg.From, &msg.To, &msg.Group, &msg.Content, &msg.Type, &msg.CreatedAt); err != nil {
+			return nil, fmt.Errorf("failed to scan message: %v", err)
+		}
+		messages = append(messages, &msg)
+	}
+
+	return messages, nil
 }
 
 func (d *Database) SaveMessage(fromID int, toID *int, groupID *int, content, msgType string) (*DBMessage, error) {

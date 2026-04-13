@@ -10,9 +10,10 @@
   <!-- 登录界面 -->
   <div id="loginPanel" class="panel login-panel">
     <div class="login-container">
+      <div class="hero-sparkles"></div>
       <div class="login-header">
-        <h1>🌸 IM System</h1>
-        <p>即时通信系统</p>
+        <h1>🌸 梦幻 IM</h1>
+        <p>欢迎来到二次元聊天空间</p>
       </div>
       
       <form class="login-form" id="loginForm">
@@ -30,12 +31,26 @@
           <label for="password">密码</label>
           <input id="password" type="password" placeholder="例如: 123" />
         </div>
+
+        <div class="form-group avatar-select-group">
+          <label for="loginAvatarUpload">上传头像（可选）</label>
+          <div class="avatar-upload-container">
+            <input
+              id="loginAvatarUpload"
+              type="file"
+              accept="image/*"
+              class="avatar-file-input"
+            />
+            <div class="avatar-preview" id="loginAvatarPreview">📷</div>
+            <p class="upload-hint">点击预览框选择图片（支持 JPG/PNG/GIF）</p>
+          </div>
+        </div>
         
         <button id="connectBtn" type="button" class="btn btn-primary btn-lg">
-          🔌 连接到服务器
+          ✨ 登录 / 连接
         </button>
         
-        <p class="hint">默认用户: alice/bob/charlie 密码均为 123</p>
+        <p class="hint">默认用户: alice/bob/charlie，密码均为 123。也可直接注册新账号。</p>
       </form>
     </div>
   </div>
@@ -85,6 +100,7 @@
           <button class="mode-btn" data-mode="private">💌 私聊</button>
           <button class="mode-btn" data-mode="group">👥 群聊</button>
         </div>
+        <button id="loadHistoryBtn" class="btn btn-secondary btn-sm history-btn">📜 加载历史</button>
       </header>
 
       <!-- 消息列表 -->
@@ -177,6 +193,21 @@
           <input type="range" id="fontSizeSlider" min="12" max="18" value="14" />
           <span id="fontSizeValue">14px</span>
         </div>
+      </section>
+
+      <section class="card">
+        <h3>头像设置</h3>
+        <div class="avatar-upload-container">
+          <input
+            id="settingsAvatarUpload"
+            type="file"
+            accept="image/*"
+            class="avatar-file-input"
+          />
+          <div class="avatar-preview" id="settingsAvatarPreview"></div>
+          <p class="upload-hint">点击预览框选择新头像</p>
+        </div>
+        <button id="saveAvatarBtn" class="btn btn-primary">保存头像</button>
       </section>
     </div>
   </div>

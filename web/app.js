@@ -38,8 +38,14 @@ const modeBtns = document.querySelectorAll('.mode-btn');
 const chatTitle = document.getElementById('chatTitle');
 const chatSubtitle = document.getElementById('chatSubtitle');
 
+const loginAvatarUpload = document.getElementById('loginAvatarUpload');
+const loginAvatarPreview = document.getElementById('loginAvatarPreview');
+const settingsAvatarUpload = document.getElementById('settingsAvatarUpload');
+const settingsAvatarPreview = document.getElementById('settingsAvatarPreview');
+const saveAvatarBtn = document.getElementById('saveAvatarBtn');
 const showGroupsBtn = document.getElementById('showGroupsBtn');
 const showSettingsBtn = document.getElementById('showSettingsBtn');
+const loadHistoryBtn = document.getElementById('loadHistoryBtn');
 const createGroupBtn = document.getElementById('createGroupBtn');
 const newGroupNameInput = document.getElementById('newGroupName');
 
@@ -51,9 +57,11 @@ const fontSizeValue = document.getElementById('fontSizeValue');
 // ==================== 全局变量 ====================
 let mode = 'public';
 let eventSource = null;
+let authToken = '';
 let currentUsername = '';
 let currentPassword = '';
 let currentAvatar = '';
+let uploadedAvatarBase64 = null;
 let myGroups = [];
 
 // ==================== 工具函数 ====================
@@ -67,6 +75,15 @@ function showPanel(panelName) {
 function addMsg(text, type = 'incoming') {
   const msgDiv = document.createElement('div');
   msgDiv.className = `msg ${type}`;
+
+  if (text.startsWith('[私聊]')) {
+    msgDiv.classList.add('private');
+  } else if (text.startsWith('[群聊') || text.includes('[群聊')) {
+    msgDiv.classList.add('group');
+  } else if (text.includes(`我:`) || text.includes(`我 ->`)) {
+    msgDiv.classList.add('outgoing');
+  }
+
   msgDiv.textContent = text;
   messageList.appendChild(msgDiv);
   messageList.scrollTop = messageList.scrollHeight;
@@ -127,14 +144,16 @@ registerBtn.addEventListener('click', async () => {
   }
   
   try {
+    const avatarToUse = uploadedAvatarBase64 || '👤';
     const response = await fetch('/api/register', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: name, password: password })
+      body: JSON.stringify({ username: name, password: password, avatar: avatarToUse })
     });
 
     if (response.ok) {
       alert('注册成功！请使用您的凭据登录。');
+      uploadedAvatarBase64 = null;
     } else {
       const error = await response.text();
       alert('注册失败: ' + error);
@@ -145,47 +164,140 @@ registerBtn.addEventListener('click', async () => {
   }
 });
 
-// 连接到 SSE 服务
-function connect() {
-  if (eventSource) eventSource.close();
-  
-  eventSource = new EventSource(
-    `/api/events?name=${encodeURIComponent(currentUsername)}&password=${encodeURIComponent(currentPassword)}`
-  );
+// ==================== 头像文件上传处理 ====================
+function handleAvatarFileSelect(fileInput, preview) {
+  fileInput.addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
 
-  eventSource.onmessage = (event) => {
-    addMsg(event.data, 'incoming');
-  };
+    if (file.size > 2 * 1024 * 1024) {
+      alert('图片太大，请选择小于 2MB 的图片');
+      fileInput.value = '';
+      return;
+    }
 
-  eventSource.addEventListener('system', (event) => {
-    addMsg(event.data, 'system');
+    if (!file.type.startsWith('image/')) {
+      alert('请选择有效的图片文件');
+      fileInput.value = '';
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const base64Data = event.target.result;
+      uploadedAvatarBase64 = base64Data;
+      
+      const img = document.createElement('img');
+      img.src = base64Data;
+      preview.innerHTML = '';
+      preview.appendChild(img);
+    };
+    reader.onerror = () => {
+      alert('读取文件失败');
+      fileInput.value = '';
+    };
+    reader.readAsDataURL(file);
   });
 
-  eventSource.onerror = () => {
-    addMsg('连接断开', 'system');
-    showPanel('login');
-  };
+  preview.addEventListener('click', () => {
+    fileInput.click();
+  });
+}
 
-  // 成功连接后，使用 /api/online 获取用户信息
-  fetch('/api/online')
-    .then(res => res.json())
-    .then(data => {
-      if (data.online && data.online.length > 0) {
-        const user = data.online.find(u => u.name === currentUsername);
-        if (user) {
-          currentAvatar = user.avatar;
-          userAvatar.textContent = user.avatar;
-        } else {
-          currentAvatar = '👤';
-          userAvatar.textContent = '👤';
-        }
-      }
-      userNameDisplay.textContent = currentUsername;
-      userStatus.textContent = '🟢 在线';
-      showPanel('chat');
-      refreshOnlineList();
-    })
-    .catch(err => console.error('获取用户信息失败:', err));
+handleAvatarFileSelect(loginAvatarUpload, loginAvatarPreview);
+handleAvatarFileSelect(settingsAvatarUpload, settingsAvatarPreview);
+
+saveAvatarBtn.addEventListener('click', async () => {
+  if (!authToken) {
+    alert('请先登录后再修改头像');
+    return;
+  }
+
+  if (!uploadedAvatarBase64) {
+    alert('请先选择一个头像图片');
+    return;
+  }
+
+  try {
+    const response = await fetch('/api/avatar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: authToken, avatar: uploadedAvatarBase64 })
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      alert('更新头像失败: ' + error);
+      return;
+    }
+
+    currentAvatar = uploadedAvatarBase64;
+    if (uploadedAvatarBase64.startsWith('data:')) {
+      userAvatar.innerHTML = `<img src="${uploadedAvatarBase64}" style="width:100%;height:100%;border-radius:50%;object-fit:cover;" />`;
+    } else {
+      userAvatar.textContent = uploadedAvatarBase64;
+    }
+    addMsg('头像更新成功！', 'system');
+  } catch (err) {
+    console.error('更新头像失败:', err);
+    alert('更新头像失败');
+  }
+});
+
+// 连接到 SSE 服务
+async function connect() {
+  if (eventSource) eventSource.close();
+
+  try {
+    const response = await fetch('/api/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: currentUsername, password: currentPassword })
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      alert('登录失败: ' + error);
+      return;
+    }
+
+    const result = await response.json();
+    authToken = result.token;
+    currentAvatar = result.avatar || '👤';
+    
+    // 显示头像（支持 base64 图片或 emoji）
+    if (currentAvatar.startsWith('data:')) {
+      userAvatar.innerHTML = `<img src="${currentAvatar}" style="width:100%;height:100%;border-radius:50%;object-fit:cover;" />`;
+    } else {
+      userAvatar.textContent = currentAvatar;
+    }
+
+    eventSource = new EventSource(`/api/events?token=${encodeURIComponent(authToken)}`);
+
+    eventSource.onmessage = (event) => {
+      addMsg(event.data, 'incoming');
+    };
+
+    eventSource.addEventListener('system', (event) => {
+      addMsg(event.data, 'system');
+    });
+
+    eventSource.onerror = () => {
+      addMsg('连接断开，请重新登录', 'system');
+      if (eventSource) eventSource.close();
+      showPanel('login');
+    };
+
+    userNameDisplay.textContent = currentUsername;
+    userStatus.textContent = '🟢 在线';
+    showPanel('chat');
+    await refreshOnlineList();
+    await refreshGroupList();
+    await loadHistory('public');
+  } catch (err) {
+    console.error('登录失败:', err);
+    alert('连接服务器失败');
+  }
 }
 
 // 模式切换
@@ -211,7 +323,16 @@ async function refreshOnlineList() {
           return // 不显示自己
         }
         const li = document.createElement('li');
-        li.innerHTML = `<span>${user.avatar || '👤'}</span> ${user.name}`;
+        
+        // 处理头像显示（支持 base64 图片或 emoji）
+        let avatarHTML;
+        if (user.avatar && user.avatar.startsWith('data:')) {
+          avatarHTML = `<img src="${user.avatar}" style="width:24px;height:24px;border-radius:50%;object-fit:cover;" />`;
+        } else {
+          avatarHTML = `<span>${user.avatar || '👤'}</span>`;
+        }
+        
+        li.innerHTML = `${avatarHTML} ${user.name}`;
         li.title = user.name;
         li.addEventListener('click', () => {
           toUserInput.value = user.name;
@@ -249,6 +370,7 @@ async function sendMessage() {
   if (!text) return;
 
   const payload = {
+    token: authToken,
     name: currentUsername,
     message: text,
     mode
@@ -300,7 +422,10 @@ async function sendMessage() {
 }
 
 // 群组管理
-showGroupsBtn.addEventListener('click', () => showPanel('groups'));
+showGroupsBtn.addEventListener('click', async () => {
+  await refreshGroupList();
+  showPanel('groups');
+});
 showSettingsBtn.addEventListener('click', () => showPanel('settings'));
 
 createGroupBtn.addEventListener('click', async () => {
@@ -310,13 +435,25 @@ createGroupBtn.addEventListener('click', async () => {
     return;
   }
 
-  if (!myGroups.includes(groupName)) {
-    myGroups.push(groupName);
+  try {
+    const response = await fetch('/api/group', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: authToken, action: 'create', groupName })
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      alert('创建群组失败: ' + error);
+      return;
+    }
+
     newGroupNameInput.value = '';
-    updateGroupsList();
-    addMsg(`群组 ${groupName} 创建成功`, 'system');
-  } else {
-    alert('群组已存在');
+    addMsg(`已创建群组：${groupName}`, 'system');
+    await refreshGroupList();
+  } catch (err) {
+    console.error('创建群组失败:', err);
+    alert('创建群组失败');
   }
 });
 
@@ -334,14 +471,17 @@ function updateGroupsList() {
       const li = document.createElement('li');
       li.innerHTML = `
         <span>👥 ${groupName}</span>
-        <button class="btn btn-sm" onclick="joinGroup('${groupName}')">进入</button>
+        <div class="group-controls">
+          <button class="btn btn-sm" onclick="selectGroup('${groupName}')">进入</button>
+          <button class="btn btn-secondary btn-sm" onclick="leaveGroup('${groupName}')">离开</button>
+        </div>
       `;
       list.appendChild(li);
     });
   }
 }
 
-function joinGroup(groupName) {
+async function selectGroup(groupName) {
   toGroupInput.value = groupName;
   mode = 'group';
   modeBtns.forEach(b => b.classList.remove('active'));
@@ -350,14 +490,130 @@ function joinGroup(groupName) {
   showPanel('chat');
 }
 
+async function leaveGroup(groupName) {
+  try {
+    const response = await fetch('/api/group', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: authToken, action: 'leave', groupName })
+    });
+
+    if (!response.ok) {
+      const error = await response.text();
+      alert('离开群组失败: ' + error);
+      return;
+    }
+
+    addMsg(`已离开群组：${groupName}`, 'system');
+    await refreshGroupList();
+  } catch (err) {
+    console.error('离开群组失败:', err);
+    alert('离开群组失败');
+  }
+}
+
+async function refreshGroupList() {
+  if (!authToken) {
+    return;
+  }
+
+  try {
+    const response = await fetch(`/api/groups?token=${encodeURIComponent(authToken)}`);
+    if (!response.ok) {
+      throw new Error('无法获取群组列表');
+    }
+
+    const data = await response.json();
+    myGroups = data.groups || [];
+    updateGroupsList();
+  } catch (err) {
+    console.error('刷新群组列表失败:', err);
+  }
+}
+
+async function loadHistory(type, target) {
+  if (!authToken) {
+    alert('请先登录后再加载历史');
+    return;
+  }
+
+  let url = `/api/history?token=${encodeURIComponent(authToken)}&type=${encodeURIComponent(type)}`;
+  if (type === 'group') {
+    if (!target) {
+      alert('请输入群名以加载群聊历史');
+      return;
+    }
+    url += `&group=${encodeURIComponent(target)}`;
+  }
+  if (type === 'private') {
+    if (!target) {
+      alert('请输入私聊对象以加载私聊历史');
+      return;
+    }
+    url += `&peer=${encodeURIComponent(target)}`;
+  }
+
+  try {
+    const response = await fetch(url);
+    if (!response.ok) {
+      const error = await response.text();
+      alert('加载历史失败: ' + error);
+      return;
+    }
+
+    const data = await response.json();
+    const history = data.history || [];
+    messageList.innerHTML = '';
+
+    if (history.length === 0) {
+      addMsg('暂无历史消息。', 'system');
+      return;
+    }
+
+    history.reverse().forEach(item => {
+      let text = item.content;
+      if (item.type === 'group') {
+        text = `[群聊 ${item.group}] ${item.from}: ${item.content}`;
+      } else if (item.type === 'private') {
+        text = `[私聊] ${item.from} -> ${item.to}: ${item.content}`;
+      } else {
+        text = `${item.from}: ${item.content}`;
+      }
+      addMsg(text, item.type === 'group' ? 'group' : item.type === 'private' ? 'private' : 'incoming');
+    });
+  } catch (err) {
+    console.error('加载历史失败:', err);
+    alert('加载历史失败');
+  }
+}
+
+loadHistoryBtn.addEventListener('click', () => {
+  const target = mode === 'group' ? toGroupInput.value.trim() : mode === 'private' ? toUserInput.value.trim() : '';
+  loadHistory(mode, target);
+});
+
 // 退出登录
-logoutBtn.addEventListener('click', () => {
+logoutBtn.addEventListener('click', async () => {
   if (eventSource) eventSource.close();
+
+  if (authToken) {
+    await fetch('/api/logout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: authToken })
+    }).catch(() => {});
+  }
+
+  authToken = '';
   currentUsername = '';
   currentPassword = '';
   currentAvatar = '';
+  uploadedAvatarBase64 = null;
   myGroups = [];
   messageList.innerHTML = '';
+  userNameDisplay.textContent = '未登录';
+  userStatus.textContent = '离线';
+  userAvatar.innerHTML = '👤';
   showPanel('login');
 });
 
@@ -394,7 +650,7 @@ function init() {
   updateUIForMode();
   
   // 添加欢迎消息
-  addMsg('欢迎来到 IM System！请先登录。', 'system');
+  addMsg('欢迎来到梦幻 IM！请先登录。', 'system');
 }
 
 init();

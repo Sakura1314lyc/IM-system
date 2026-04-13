@@ -102,7 +102,7 @@ func (this *User) DoMessage(msg string) {
 			}
 			username := strings.TrimSpace(parts[1])
 			password := strings.TrimSpace(parts[2])
-			if err := this.Server.Register(username, password); err != nil {
+			if err := this.Server.Register(username, password, "👤"); err != nil {
 				this.SendMsg("注册失败: " + err.Error() + "\n")
 			} else {
 				this.SendMsg("注册成功，请使用 login|username|password 登录\n")
