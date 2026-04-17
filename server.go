@@ -160,9 +160,6 @@ func (this *Server) RenameUser(oldName, newName string) bool {
 
 // 注册新用户
 func (this *Server) Register(username, password, avatar string) error {
-	if avatar == "" {
-		avatar = "👤"
-	}
 	return this.DB.RegisterUser(username, password, avatar)
 }
 
@@ -195,7 +192,7 @@ func (this *Server) BroadCastToGroup(groupName, from, msg, avatar string) error 
 		return fmt.Errorf("获取群组ID失败: %v", err)
 	}
 
-	sendMsg := fmt.Sprintf("[群聊 %s] %s %s: %s", groupName, avatar, from, msg)
+	sendMsg := fmt.Sprintf("[群聊 %s] %s: %s", groupName, from, msg)
 	fmt.Printf("[%s] Group broadcast to %s from %s: %s\n", time.Now().Format("2006-01-02 15:04:05"), groupName, from, msg)
 
 	// 保存消息到数据库
@@ -269,7 +266,7 @@ func (this *Server) LeaveGroup(groupName, user string) error {
 // 广播消息的方法
 func (this *Server) BroadCast(user *User, msg string) {
 	msg = sanitizeInput(msg)
-	sendMsg := "[" + user.Addr + "] " + user.Avatar + " " + user.Name + ": " + msg
+	sendMsg := "[" + user.Addr + "] " + user.Name + ": " + msg
 	fmt.Printf("[%s] Broadcast from %s(%s): %s\n", time.Now().Format("2006-01-02 15:04:05"), user.Name, user.Addr, msg)
 
 	// 保存消息到数据库
@@ -286,7 +283,7 @@ func (this *Server) BroadCast(user *User, msg string) {
 
 func (this *Server) BroadCastFromWeb(name string, msg string, avatar string) {
 	msg = sanitizeInput(msg)
-	sendMsg := "[WEB] " + avatar + " " + name + ": " + msg
+	sendMsg := "[WEB] " + name + ": " + msg
 	fmt.Printf("[%s] Broadcast from WEB user %s: %s\n", time.Now().Format("2006-01-02 15:04:05"), name, msg)
 	this.Message <- sendMsg
 }
@@ -393,7 +390,7 @@ func (this *Server) SendPrivate(from, to, content, avatar string) error {
 
 	this.mapLock.RLock()
 	if user, ok := this.OnlineMap[to]; ok {
-		user.SendMsg("[私聊] " + avatar + " " + from + ": " + content + "\n")
+		user.SendMsg("[私聊] " + from + ": " + content + "\n")
 		this.mapLock.RUnlock()
 		return nil
 	}
@@ -402,7 +399,7 @@ func (this *Server) SendPrivate(from, to, content, avatar string) error {
 	this.webLock.RLock()
 	if client, ok := this.WebClients[to]; ok {
 		select {
-		case client.C <- "[私聊] " + avatar + " " + from + ": " + content:
+		case client.C <- "[私聊] " + from + ": " + content:
 		default:
 			fmt.Printf("Warning: web client %s message queue full, skip private message\n", to)
 		}
@@ -529,8 +526,8 @@ func (this *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	avatar, ok := this.Authenticate(data.Username, data.Password)
-	if !ok {
+	userInfo, err := this.DB.AuthenticateUser(data.Username, data.Password)
+	if err != nil {
 		http.Error(w, "认证失败", http.StatusUnauthorized)
 		return
 	}
@@ -542,7 +539,12 @@ func (this *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"token": token, "avatar": avatar})
+	json.NewEncoder(w).Encode(map[string]string{
+		"token":     token,
+		"avatar":    userInfo.Avatar,
+		"gender":    userInfo.Gender,
+		"signature": userInfo.Signature,
+	})
 }
 
 func (this *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
@@ -699,6 +701,72 @@ func (this *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 
 	this.BroadCastFromWeb(name, data.Message, avatar)
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (this *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet && r.Method != http.MethodPost {
+		http.Error(w, "只支持 GET 或 POST", http.StatusMethodNotAllowed)
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		token := r.URL.Query().Get("token")
+		if strings.TrimSpace(token) == "" {
+			http.Error(w, "缺少登录 token", http.StatusBadRequest)
+			return
+		}
+
+		username, ok := this.GetUsernameByToken(token)
+		if !ok {
+			http.Error(w, "认证失败", http.StatusUnauthorized)
+			return
+		}
+
+		userInfo, err := this.DB.GetUserByUsername(username)
+		if err != nil {
+			http.Error(w, "用户信息读取失败", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"username":  userInfo.Username,
+			"avatar":    userInfo.Avatar,
+			"gender":    userInfo.Gender,
+			"signature": userInfo.Signature,
+		})
+		return
+
+	case http.MethodPost:
+		var data struct {
+			Token     string `json:"token"`
+			Gender    string `json:"gender"`
+			Signature string `json:"signature"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
+			http.Error(w, "请求体解析失败", http.StatusBadRequest)
+			return
+		}
+
+		if strings.TrimSpace(data.Token) == "" {
+			http.Error(w, "token 不能为空", http.StatusBadRequest)
+			return
+		}
+
+		username, ok := this.GetUsernameByToken(data.Token)
+		if !ok {
+			http.Error(w, "认证失败", http.StatusUnauthorized)
+			return
+		}
+
+		if err := this.DB.UpdateUserProfile(username, data.Gender, data.Signature); err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		w.WriteHeader(http.StatusNoContent)
+	}
 }
 
 func (this *Server) handleAvatar(w http.ResponseWriter, r *http.Request) {
@@ -863,9 +931,10 @@ func (this *Server) handleGroup(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var data struct {
-		Token     string `json:"token"`
-		Action    string `json:"action"`
-		GroupName string `json:"groupName"`
+		Token      string `json:"token"`
+		Action     string `json:"action"`
+		GroupName  string `json:"groupName"`
+		MemberName string `json:"memberName"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
 		http.Error(w, "请求体解析失败", http.StatusBadRequest)
@@ -905,6 +974,43 @@ func (this *Server) handleGroup(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+	case "invite":
+		if strings.TrimSpace(data.MemberName) == "" {
+			http.Error(w, "memberName 不能为空", http.StatusBadRequest)
+			return
+		}
+		targetUser, err := this.DB.GetUserByUsername(data.MemberName)
+		if err != nil {
+			http.Error(w, "目标用户不存在", http.StatusNotFound)
+			return
+		}
+		if err := this.DB.JoinGroup(data.GroupName, targetUser.ID); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+	case "kick":
+		if strings.TrimSpace(data.MemberName) == "" {
+			http.Error(w, "memberName 不能为空", http.StatusBadRequest)
+			return
+		}
+		group, err := this.DB.GetGroupByName(data.GroupName)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if group.CreatorID != user.ID {
+			http.Error(w, "只有群主可以踢人", http.StatusForbidden)
+			return
+		}
+		targetUser, err := this.DB.GetUserByUsername(data.MemberName)
+		if err != nil {
+			http.Error(w, "目标用户不存在", http.StatusNotFound)
+			return
+		}
+		if err := this.DB.LeaveGroup(data.GroupName, targetUser.ID); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
 	default:
 		http.Error(w, "未知 action", http.StatusBadRequest)
 		return
@@ -941,6 +1047,154 @@ func (this *Server) handleGroups(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]interface{}{"groups": groups})
 }
 
+// 处理好友操作（加好友/删好友）
+func (this *Server) handleFriend(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "只支持 POST", http.StatusMethodNotAllowed)
+		return
+	}
+
+	token := r.Header.Get("Authorization")
+	if strings.TrimSpace(token) == "" {
+		http.Error(w, "缺少登录 token", http.StatusBadRequest)
+		return
+	}
+
+	username, ok := this.GetUsernameByToken(token)
+	if !ok {
+		http.Error(w, "认证失败", http.StatusUnauthorized)
+		return
+	}
+
+	user, err := this.DB.GetUserByUsername(username)
+	if err != nil {
+		http.Error(w, "用户不存在", http.StatusUnauthorized)
+		return
+	}
+
+	var data struct {
+		Action     string `json:"action"` // "add" 或 "remove"
+		FriendName string `json:"friend"` // 好友用户名
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
+		http.Error(w, "无效的请求格式", http.StatusBadRequest)
+		return
+	}
+
+	friendUser, err := this.DB.GetUserByUsername(data.FriendName)
+	if err != nil {
+		http.Error(w, "好友用户不存在", http.StatusNotFound)
+		return
+	}
+
+	switch data.Action {
+	case "add":
+		if err := this.DB.AddFriend(user.ID, friendUser.ID); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+	case "remove":
+		if err := this.DB.RemoveFriend(user.ID, friendUser.ID); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+	default:
+		http.Error(w, "未知 action", http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+}
+
+// 获取好友列表
+func (this *Server) handleFriends(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "只支持 GET", http.StatusMethodNotAllowed)
+		return
+	}
+
+	token := r.URL.Query().Get("token")
+	if strings.TrimSpace(token) == "" {
+		http.Error(w, "缺少登录 token", http.StatusBadRequest)
+		return
+	}
+
+	username, ok := this.GetUsernameByToken(token)
+	if !ok {
+		http.Error(w, "认证失败", http.StatusUnauthorized)
+		return
+	}
+
+	user, err := this.DB.GetUserByUsername(username)
+	if err != nil {
+		http.Error(w, "用户不存在", http.StatusUnauthorized)
+		return
+	}
+
+	friends, err := this.DB.GetFriends(user.ID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// 返回好友的用户名和头像
+	var friendList []map[string]interface{}
+	for _, f := range friends {
+		friendList = append(friendList, map[string]interface{}{
+			"name":   f.Username,
+			"avatar": f.Avatar,
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"friends": friendList})
+}
+
+// 检查是否是好友
+func (this *Server) handleCheckFriend(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "只支持 GET", http.StatusMethodNotAllowed)
+		return
+	}
+
+	token := r.URL.Query().Get("token")
+	friendName := r.URL.Query().Get("friend")
+
+	if strings.TrimSpace(token) == "" || strings.TrimSpace(friendName) == "" {
+		http.Error(w, "缺少必要参数", http.StatusBadRequest)
+		return
+	}
+
+	username, ok := this.GetUsernameByToken(token)
+	if !ok {
+		http.Error(w, "认证失败", http.StatusUnauthorized)
+		return
+	}
+
+	user, err := this.DB.GetUserByUsername(username)
+	if err != nil {
+		http.Error(w, "用户不存在", http.StatusUnauthorized)
+		return
+	}
+
+	friendUser, err := this.DB.GetUserByUsername(friendName)
+	if err != nil {
+		http.Error(w, "好友用户不存在", http.StatusNotFound)
+		return
+	}
+
+	isFriend, err := this.DB.IsFriend(user.ID, friendUser.ID)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{"isFriend": isFriend})
+}
+
 func (this *Server) StartWeb(addr string) {
 	mux := http.NewServeMux()
 	mux.Handle("/", http.FileServer(http.Dir("./web")))
@@ -954,11 +1208,22 @@ func (this *Server) StartWeb(addr string) {
 	mux.HandleFunc("/api/avatar", this.handleAvatar)
 	mux.HandleFunc("/api/group", this.handleGroup)
 	mux.HandleFunc("/api/groups", this.handleGroups)
+	mux.HandleFunc("/api/profile", this.handleProfile)
 	mux.HandleFunc("/api/history", this.handleHistory)
+	mux.HandleFunc("/api/friend", this.handleFriend)
+	mux.HandleFunc("/api/friends", this.handleFriends)
+	mux.HandleFunc("/api/check-friend", this.handleCheckFriend)
 
-	fmt.Printf("[%s] Web UI 服务启动 %s\n", time.Now().Format("2006-01-02 15:04:05"), addr)
-	if err := http.ListenAndServe(addr, mux); err != nil {
+	listener, finalAddr, err := listenWithFallback(addr, 20)
+	if err != nil {
 		fmt.Println("StartWeb err:", err)
+		return
+	}
+	defer listener.Close()
+
+	fmt.Printf("[%s] Web UI 服务启动 %s\n", time.Now().Format("2006-01-02 15:04:05"), finalAddr)
+	if err := http.Serve(listener, mux); err != nil {
+		fmt.Println("StartWeb serve err:", err)
 	}
 }
 
@@ -976,12 +1241,22 @@ func (this *Server) Start() {
 		}
 		fmt.Printf("TLS TCP server listening on %s:%d\n", this.Ip, this.Port)
 	} else {
-		listener, err = net.Listen("tcp", fmt.Sprintf("%s:%d", this.Ip, this.Port))
+		var addr string
+		var listenErr error
+		listener, addr, listenErr = listenWithFallback(fmt.Sprintf("%s:%d", this.Ip, this.Port), 20)
+		err = listenErr
 		if err != nil {
 			fmt.Println("net.Listen err:", err)
 			return
 		}
-		fmt.Printf("TCP server listening on %s:%d\n", this.Ip, this.Port)
+		if _, p, splitErr := net.SplitHostPort(addr); splitErr == nil {
+			var parsedPort int
+			fmt.Sscanf(p, "%d", &parsedPort)
+			if parsedPort > 0 {
+				this.Port = parsedPort
+			}
+		}
+		fmt.Printf("TCP server listening on %s\n", addr)
 	}
 
 	//close listen socket
@@ -1001,4 +1276,48 @@ func (this *Server) Start() {
 		go this.Handler(conn)
 
 	}
+}
+
+func listenWithFallback(addr string, maxAttempts int) (net.Listener, string, error) {
+	if maxAttempts < 1 {
+		maxAttempts = 1
+	}
+
+	host, portStr, err := net.SplitHostPort(addr)
+	if err != nil {
+		return nil, "", err
+	}
+
+	var port int
+	fmt.Sscanf(portStr, "%d", &port)
+	if port <= 0 {
+		return nil, "", fmt.Errorf("invalid port in address: %s", addr)
+	}
+
+	var lastErr error
+	for i := 0; i < maxAttempts; i++ {
+		tryAddr := net.JoinHostPort(host, fmt.Sprintf("%d", port+i))
+		ln, listenErr := net.Listen("tcp", tryAddr)
+		if listenErr == nil {
+			if i > 0 {
+				fmt.Printf("端口 %s 被占用，已自动切换到 %s\n", addr, tryAddr)
+			}
+			return ln, tryAddr, nil
+		}
+		lastErr = listenErr
+		if !isAddrInUseErr(listenErr) {
+			return nil, "", listenErr
+		}
+	}
+
+	return nil, "", fmt.Errorf("listen failed after %d attempts: %w", maxAttempts, lastErr)
+}
+
+func isAddrInUseErr(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "address already in use") ||
+		strings.Contains(msg, "only one usage")
 }

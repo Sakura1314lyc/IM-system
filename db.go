@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
+	"strings"
 	"time"
 
 	"github.com/mattn/go-sqlite3"
@@ -20,6 +21,8 @@ type DBUser struct {
 	Username  string    `json:"username"`
 	Password  string    `json:"password"`
 	Avatar    string    `json:"avatar"`
+	Gender    string    `json:"gender"`
+	Signature string    `json:"signature"`
 	CreatedAt time.Time `json:"created_at"`
 }
 
@@ -90,6 +93,8 @@ func (d *Database) createTables() error {
 		username TEXT UNIQUE NOT NULL,
 		password TEXT NOT NULL,
 		avatar TEXT DEFAULT '👤',
+		gender TEXT DEFAULT '',
+		signature TEXT DEFAULT '',
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);`
 
@@ -131,11 +136,36 @@ func (d *Database) createTables() error {
 		FOREIGN KEY (group_id) REFERENCES groups(id)
 	);`
 
-	tables := []string{userTable, groupTable, groupMembersTable, messagesTable}
+	// Friends table
+	friendsTable := `
+	CREATE TABLE IF NOT EXISTS friends (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		user_id INTEGER NOT NULL,
+		friend_id INTEGER NOT NULL,
+		status TEXT DEFAULT 'accepted' CHECK(status IN ('pending', 'accepted', 'blocked')),
+		created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+		UNIQUE(user_id, friend_id),
+		FOREIGN KEY (user_id) REFERENCES users(id),
+		FOREIGN KEY (friend_id) REFERENCES users(id)
+	);`
+
+	tables := []string{userTable, groupTable, groupMembersTable, messagesTable, friendsTable}
 
 	for _, table := range tables {
 		if _, err := d.db.Exec(table); err != nil {
 			return fmt.Errorf("failed to create table: %v", err)
+		}
+	}
+
+	// 兼容升级已有用户表，新增 profile 字段
+	if _, err := d.db.Exec("ALTER TABLE users ADD COLUMN gender TEXT DEFAULT ''"); err != nil {
+		if !strings.Contains(err.Error(), "duplicate column name") {
+			return fmt.Errorf("failed to alter users table gender: %v", err)
+		}
+	}
+	if _, err := d.db.Exec("ALTER TABLE users ADD COLUMN signature TEXT DEFAULT ''"); err != nil {
+		if !strings.Contains(err.Error(), "duplicate column name") {
+			return fmt.Errorf("failed to alter users table signature: %v", err)
 		}
 	}
 
@@ -144,13 +174,15 @@ func (d *Database) createTables() error {
 
 func (d *Database) createDefaultUsers() error {
 	defaultUsers := []struct {
-		username string
-		password string
-		avatar   string
+		username  string
+		password  string
+		avatar    string
+		gender    string
+		signature string
 	}{
-		{"alice", "123", "👨‍💼"},
-		{"bob", "123", "👩‍💼"},
-		{"charlie", "123", "👨‍💻"},
+		{"alice", "123", "👨‍💼", "female", "保持微笑，世界温柔。"},
+		{"bob", "123", "👩‍💼", "male", "代码即诗。"},
+		{"charlie", "123", "👨‍💻", "male", "永远在终端里历险。"},
 	}
 
 	for _, user := range defaultUsers {
@@ -160,9 +192,9 @@ func (d *Database) createDefaultUsers() error {
 		}
 
 		_, err = d.db.Exec(`
-			INSERT OR IGNORE INTO users (username, password, avatar)
-			VALUES (?, ?, ?)`,
-			user.username, string(hashedPassword), user.avatar)
+			INSERT OR IGNORE INTO users (username, password, avatar, gender, signature)
+			VALUES (?, ?, ?, ?, ?)`,
+			user.username, string(hashedPassword), user.avatar, user.gender, user.signature)
 		if err != nil {
 			return fmt.Errorf("failed to create default user %s: %v", user.username, err)
 		}
@@ -174,9 +206,9 @@ func (d *Database) createDefaultUsers() error {
 func (d *Database) AuthenticateUser(username, password string) (*DBUser, error) {
 	var user DBUser
 	err := d.db.QueryRow(`
-		SELECT id, username, password, avatar, created_at
+		SELECT id, username, password, avatar, gender, signature, created_at
 		FROM users WHERE username = ?`, username).Scan(
-		&user.ID, &user.Username, &user.Password, &user.Avatar, &user.CreatedAt)
+		&user.ID, &user.Username, &user.Password, &user.Avatar, &user.Gender, &user.Signature, &user.CreatedAt)
 
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("user not found")
@@ -223,9 +255,9 @@ func (d *Database) RegisterUser(username, password, avatar string) error {
 func (d *Database) GetUserByID(id int) (*DBUser, error) {
 	var user DBUser
 	err := d.db.QueryRow(`
-		SELECT id, username, password, avatar, created_at
+		SELECT id, username, password, avatar, gender, signature, created_at
 		FROM users WHERE id = ?`, id).Scan(
-		&user.ID, &user.Username, &user.Password, &user.Avatar, &user.CreatedAt)
+		&user.ID, &user.Username, &user.Password, &user.Avatar, &user.Gender, &user.Signature, &user.CreatedAt)
 
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("user not found")
@@ -240,9 +272,9 @@ func (d *Database) GetUserByID(id int) (*DBUser, error) {
 func (d *Database) GetUserByUsername(username string) (*DBUser, error) {
 	var user DBUser
 	err := d.db.QueryRow(`
-		SELECT id, username, password, avatar, created_at
+		SELECT id, username, password, avatar, gender, signature, created_at
 		FROM users WHERE username = ?`, username).Scan(
-		&user.ID, &user.Username, &user.Password, &user.Avatar, &user.CreatedAt)
+		&user.ID, &user.Username, &user.Password, &user.Avatar, &user.Gender, &user.Signature, &user.CreatedAt)
 
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("user not found")
@@ -415,6 +447,14 @@ func (d *Database) UpdateUserAvatar(username, avatar string) error {
 	return nil
 }
 
+func (d *Database) UpdateUserProfile(username, gender, signature string) error {
+	_, err := d.db.Exec(`UPDATE users SET gender = ?, signature = ? WHERE username = ?`, gender, signature, username)
+	if err != nil {
+		return fmt.Errorf("failed to update profile: %v", err)
+	}
+	return nil
+}
+
 func (d *Database) GetPublicMessages(limit int) ([]*DBMessageExt, error) {
 	rows, err := d.db.Query(`
 		SELECT m.id, u.username, '', '', m.content, m.type, m.created_at
@@ -545,8 +585,99 @@ func (d *Database) GetMessageHistory(limit int) ([]*DBMessage, error) {
 	return messages, nil
 }
 
-func (d *Database) Close() error {
-	return d.db.Close()
+// 加好友
+func (d *Database) AddFriend(userID int, friendID int) error {
+	if userID == friendID {
+		return fmt.Errorf("cannot add yourself as friend")
+	}
+
+	// 检查用户是否存在
+	var exists int
+	err := d.db.QueryRow("SELECT id FROM users WHERE id = ?", friendID).Scan(&exists)
+	if err == sql.ErrNoRows {
+		return fmt.Errorf("friend not found")
+	}
+	if err != nil {
+		return fmt.Errorf("database error: %v", err)
+	}
+
+	// 添加好友关系（单向）
+	_, err = d.db.Exec(`
+		INSERT OR IGNORE INTO friends (user_id, friend_id, status)
+		VALUES (?, ?, 'accepted')`, userID, friendID)
+
+	if err != nil {
+		return fmt.Errorf("failed to add friend: %v", err)
+	}
+
+	return nil
+}
+
+// 删除好友
+func (d *Database) RemoveFriend(userID int, friendID int) error {
+	result, err := d.db.Exec(`
+		DELETE FROM friends
+		WHERE user_id = ? AND friend_id = ?`, userID, friendID)
+
+	if err != nil {
+		return fmt.Errorf("failed to remove friend: %v", err)
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("failed to get rows affected: %v", err)
+	}
+
+	if rowsAffected == 0 {
+		return fmt.Errorf("friend not found")
+	}
+
+	return nil
+}
+
+// 获取用户的好友列表
+func (d *Database) GetFriends(userID int) ([]*DBUser, error) {
+	rows, err := d.db.Query(`
+		SELECT u.id, u.username, u.password, u.avatar, u.created_at
+		FROM users u
+		JOIN friends f ON u.id = f.friend_id
+		WHERE f.user_id = ? AND f.status = 'accepted'
+		ORDER BY u.username`, userID)
+
+	if err != nil {
+		return nil, fmt.Errorf("database error: %v", err)
+	}
+	defer rows.Close()
+
+	var friends []*DBUser
+	for rows.Next() {
+		var user DBUser
+		err := rows.Scan(&user.ID, &user.Username, &user.Password, &user.Avatar, &user.CreatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan user: %v", err)
+		}
+		friends = append(friends, &user)
+	}
+
+	return friends, nil
+}
+
+// 检查是否是好友
+func (d *Database) IsFriend(userID int, friendID int) (bool, error) {
+	var exists int
+	err := d.db.QueryRow(`
+		SELECT 1 FROM friends
+		WHERE user_id = ? AND friend_id = ? AND status = 'accepted'
+		LIMIT 1`, userID, friendID).Scan(&exists)
+
+	if err == sql.ErrNoRows {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("database error: %v", err)
+	}
+
+	return true, nil
 }
 
 // generateSelfSignedCert generates a self-signed TLS certificate for development

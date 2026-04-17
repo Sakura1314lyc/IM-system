@@ -32,6 +32,6 @@ func main() {
 	// Web UI + REST/SSE 服务
 	go server.StartWeb(webAddr)
 
-	fmt.Printf("启动完成:TCP %s:%d,Web %s, DB: %s, TLS: %v\n", serverIP, serverPort, webAddr, dbPath, enableTLS)
+	fmt.Printf("启动中:TCP %s:%d,Web %s, DB: %s, TLS: %v\n", serverIP, serverPort, webAddr, dbPath, enableTLS)
 	select {}
 }
