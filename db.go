@@ -53,6 +53,8 @@ type DBMessage struct {
 type DBMessageExt struct {
 	ID        int       `json:"id"`
 	From      string    `json:"from"`
+	Avatar    string    `json:"avatar"`
+	Signature string    `json:"signature"`
 	To        string    `json:"to,omitempty"`
 	Group     string    `json:"group,omitempty"`
 	Content   string    `json:"content"`
@@ -457,7 +459,7 @@ func (d *Database) UpdateUserProfile(username, gender, signature string) error {
 
 func (d *Database) GetPublicMessages(limit int) ([]*DBMessageExt, error) {
 	rows, err := d.db.Query(`
-		SELECT m.id, u.username, '', '', m.content, m.type, m.created_at
+		SELECT m.id, u.username, u.avatar, u.signature, '', '', m.content, m.type, m.created_at
 		FROM messages m
 		JOIN users u ON m.from_id = u.id
 		WHERE m.type = 'public'
@@ -471,7 +473,7 @@ func (d *Database) GetPublicMessages(limit int) ([]*DBMessageExt, error) {
 	var messages []*DBMessageExt
 	for rows.Next() {
 		var msg DBMessageExt
-		if err := rows.Scan(&msg.ID, &msg.From, &msg.To, &msg.Group, &msg.Content, &msg.Type, &msg.CreatedAt); err != nil {
+		if err := rows.Scan(&msg.ID, &msg.From, &msg.Avatar, &msg.Signature, &msg.To, &msg.Group, &msg.Content, &msg.Type, &msg.CreatedAt); err != nil {
 			return nil, fmt.Errorf("failed to scan message: %v", err)
 		}
 		messages = append(messages, &msg)
@@ -482,7 +484,7 @@ func (d *Database) GetPublicMessages(limit int) ([]*DBMessageExt, error) {
 
 func (d *Database) GetGroupMessages(groupName string, limit int) ([]*DBMessageExt, error) {
 	rows, err := d.db.Query(`
-		SELECT m.id, u.username, '', g.name, m.content, m.type, m.created_at
+		SELECT m.id, u.username, u.avatar, u.signature, '', g.name, m.content, m.type, m.created_at
 		FROM messages m
 		JOIN users u ON m.from_id = u.id
 		JOIN groups g ON m.group_id = g.id
@@ -497,7 +499,7 @@ func (d *Database) GetGroupMessages(groupName string, limit int) ([]*DBMessageEx
 	var messages []*DBMessageExt
 	for rows.Next() {
 		var msg DBMessageExt
-		if err := rows.Scan(&msg.ID, &msg.From, &msg.To, &msg.Group, &msg.Content, &msg.Type, &msg.CreatedAt); err != nil {
+		if err := rows.Scan(&msg.ID, &msg.From, &msg.Avatar, &msg.Signature, &msg.To, &msg.Group, &msg.Content, &msg.Type, &msg.CreatedAt); err != nil {
 			return nil, fmt.Errorf("failed to scan message: %v", err)
 		}
 		messages = append(messages, &msg)
@@ -508,7 +510,7 @@ func (d *Database) GetGroupMessages(groupName string, limit int) ([]*DBMessageEx
 
 func (d *Database) GetPrivateMessages(username, peer string, limit int) ([]*DBMessageExt, error) {
 	rows, err := d.db.Query(`
-		SELECT m.id, u.username, u2.username, NULL, m.content, m.type, m.created_at
+		SELECT m.id, u.username, u.avatar, u.signature, u2.username, '', m.content, m.type, m.created_at
 		FROM messages m
 		JOIN users u ON m.from_id = u.id
 		JOIN users u2 ON m.to_id = u2.id
@@ -523,7 +525,7 @@ func (d *Database) GetPrivateMessages(username, peer string, limit int) ([]*DBMe
 	var messages []*DBMessageExt
 	for rows.Next() {
 		var msg DBMessageExt
-		if err := rows.Scan(&msg.ID, &msg.From, &msg.To, &msg.Group, &msg.Content, &msg.Type, &msg.CreatedAt); err != nil {
+		if err := rows.Scan(&msg.ID, &msg.From, &msg.Avatar, &msg.Signature, &msg.To, &msg.Group, &msg.Content, &msg.Type, &msg.CreatedAt); err != nil {
 			return nil, fmt.Errorf("failed to scan message: %v", err)
 		}
 		messages = append(messages, &msg)

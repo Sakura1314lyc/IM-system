@@ -31,6 +31,7 @@
 - ✅ 输入验证与安全过滤。
 - ✅ 群聊功能（创建、加入、离开群，群消息广播）。
 - ✅ Web UI 支持公聊、私聊、群聊模式，并可加载历史消息。
+- ✅ Web UI 支持好友管理、在线发现、别人资料查看、长对话滚动和头像上传。
 - ✅ SQLite数据库持久化（用户、群组、消息历史）。
 - ✅ 密码安全哈希（bcrypt）。
 
@@ -153,9 +154,10 @@ group|send|mygroup|hello everyone
 3. 注册新用户或使用默认用户登录（默认用户：alice/bob/charlie，密码：123）。
 4. 在 Web UI 中选择公聊、私聊或群聊模式。
 5. 使用“加载历史”按钮回溯公聊、私聊或群聊消息历史。
-6. 注册后可在设置界面选择并保存头像。
-7. 创建群组、加入群组，并通过群聊发送消息。
-8. 在命令行客户端中也可登录到同一服务，与 Web 用户互通。
+6. 点击自己头像可编辑个人简介和头像；点击对方头像可查看对方简介。
+7. 在联系人面板添加/删除好友，或从在线列表、发现面板直接发起私聊。
+8. 创建群组、加入群组、邀请成员，并通过群聊发送消息。
+9. 在命令行客户端中也可登录到同一服务，与 Web 用户互通。
 
 ## 并发与实现说明
 
@@ -203,15 +205,18 @@ group|send|mygroup|hello everyone
 - `POST /api/send`：发送消息（支持公聊/私聊/群聊）
 - `POST /api/rename`：修改昵称
 - `POST /api/avatar`：更新当前用户头像
+- `GET /api/profile?token=<token>&user=<username>`：读取当前用户或指定用户简介
 - `GET /api/groups?token=<token>`：获取当前用户群组列表
-- `POST /api/group`：创建/加入/离开群组
-- `GET /api/history?token=<token>&type=<public|private|group>&peer=<user>&group=<group>`：加载聊天历史
+- `POST /api/group`：创建/加入/离开/邀请群组成员
+- `GET /api/friends?token=<token>`：获取好友列表
+- `POST /api/friend`：添加或删除好友（通过 `Authorization` 请求头传入 token）
+- `GET /api/history?token=<token>&type=<public|private|group>&peer=<user>&group=<group>&limit=<n>`：加载聊天历史，默认最多 300 条，最大 500 条
 
 静态页面已被放在 `web/` 目录：
 
 - `web/index.html`：页面结构
 - `web/styles.css`：界面风格增强
-- `web/app.js`：改为真实 API 调用 + 响应式消息流
+- `web/app.js`：真实 API 调用 + SSE 消息流 + 好友/群组/发现/资料交互
 
 ### 访问步骤
 
@@ -219,6 +224,8 @@ group|send|mygroup|hello everyone
 2. 打开浏览器：`http://127.0.0.1:8080/`
 3. 在 Web 登录页面输入用户名、密码，并选择头像。
 4. 登录后即可切换公聊/私聊/群聊，并使用“加载历史”按钮查看历史记录。
+5. 发现面板可查看在线用户、好友数、群组数，并能快捷私聊或添加好友。
+6. 中间聊天区为内部滚动区域，可承载较长历史对话，不会撑开整体布局。
 
 > 注：TCP CLI 用户（`go run ./cmd/client/main.go`）与 Web UI 用户可混合在线互通。
 

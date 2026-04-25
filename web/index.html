@@ -3,215 +3,232 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>IM System Web</title>
-  <link rel="stylesheet" href="./styles.css" />
+  <title>NekoChat</title>
+  <link rel="stylesheet" href="./styles.css?v=20260425-ui4" />
 </head>
 <body>
-  <!-- 登录界面 -->
-  <div id="loginPanel" class="panel login-panel">
-    <div class="login-container">
-      <div class="hero-sparkles"></div>
-      <div class="login-header">
-        <h1>🌸 梦幻 IM</h1>
-        <p>欢迎来到二次元聊天空间</p>
-      </div>
-      
-      <form class="login-form" id="loginForm">
-        <div class="form-group">
-          <label for="username">用户名</label>
-          <input
-            id="username"
-            type="text"
-            placeholder="例如: alice"
-            autocomplete="off"
-          />
-        </div>
-        
-        <div class="form-group">
-          <label for="password">密码</label>
-          <input id="password" type="password" placeholder="例如: 123" />
-        </div>
-
-        <div class="form-group avatar-select-group">
-          <label for="loginAvatarUpload">上传头像（可选）</label>
-          <div class="avatar-upload-container">
-            <input
-              id="loginAvatarUpload"
-              type="file"
-              accept="image/*"
-              class="avatar-file-input"
-            />
-            <div class="avatar-preview" id="loginAvatarPreview">📷</div>
-            <p class="upload-hint">点击预览框选择图片（支持 JPG/PNG/GIF）</p>
-          </div>
-        </div>
-        
-        <button id="connectBtn" type="button" class="btn btn-primary btn-lg">
-          ✨ 登录 / 连接
-        </button>
-        
-        <p class="hint">默认用户: alice/bob/charlie，密码均为 123。也可直接注册新账号。</p>
-      </form>
-    </div>
+  <div id="loginPanel" class="login-panel">
+    <form id="loginForm" class="login-card">
+      <div class="brand-mark"><span>🐾</span></div>
+      <h1><span>Neko</span>Chat</h1>
+      <p>一起轻松聊天吧</p>
+      <label>
+        用户名
+        <input id="username" type="text" autocomplete="username" placeholder="alice / bob / charlie" />
+      </label>
+      <label>
+        密码
+        <input id="password" type="password" autocomplete="current-password" placeholder="默认密码 123" />
+      </label>
+      <label class="avatar-upload">
+        <input id="loginAvatarUpload" type="file" accept="image/*" />
+        <span id="loginAvatarPreview" class="avatar-preview">📷</span>
+        <small>注册时可上传头像，支持 JPG / PNG / GIF / WebP</small>
+      </label>
+      <button id="connectBtn" class="primary-btn" type="button">登录 / 连接</button>
+      <button id="registerBtn" class="secondary-btn" type="button">注册账号</button>
+      <small class="muted">默认用户：alice、bob、charlie；默认密码：123</small>
+    </form>
   </div>
 
-  <!-- 主聊天界面 -->
-  <div id="chatPanel" class="panel chat-panel" style="display: none">
-    <!-- 侧边栏 -->
-    <aside class="sidebar">
-      <!-- 用户卡片 -->
-      <section class="user-card card">
-        <div class="avatar-display" id="userAvatar">👤</div>
-        <h3 id="userNameDisplay">未登录</h3>
-        <p class="status" id="userStatus">离线</p>
-        <button id="logoutBtn" class="btn btn-secondary btn-sm">退出登录</button>
-      </section>
-
-      <!-- 在线用户列表 -->
-      <section class="online-section card">
-        <div class="section-header">
-          <h3>👥 在线用户</h3>
-          <button id="refreshBtn" class="text-btn" title="刷新">🔄</button>
-        </div>
-        <ul id="onlineList" class="user-list">
-          <li class="loading">加载中...</li>
-        </ul>
-      </section>
-
-      <!-- 操作面板 -->
-      <section class="actions card">
-        <h3>⚙️ 快捷操作</h3>
-        <button id="showGroupsBtn" class="btn btn-secondary btn-block">📋 我的群组</button>
-        <button id="showSettingsBtn" class="btn btn-secondary btn-block">🎨 界面设置</button>
-      </section>
+  <div id="appPanel" class="app-shell" hidden>
+    <aside class="scene-rail">
+      <div class="sakura-branch" aria-hidden="true"></div>
+      <button class="rail-logo" type="button" data-panel="home"><span>🐾</span><small>首页</small></button>
+      <button class="rail-item active" type="button" data-mode-jump="public"><span>💬</span><small>聊天</small></button>
+      <button class="rail-item" type="button" id="contactsRailBtn"><span>♧</span><small>联系人</small></button>
+      <button class="rail-item" type="button" id="groupsRailBtn"><span>☷</span><small>群组</small></button>
+      <button class="rail-item" type="button" id="discoverRailBtn"><span>⌖</span><small>发现</small></button>
+      <button class="rail-item" type="button" id="settingsRailBtn"><span>⚙</span><small>设置</small></button>
+      <div class="torii" aria-hidden="true"></div>
     </aside>
 
-    <!-- 主内容区 -->
-    <main class="main-content">
-      <!-- 顶部栏 -->
-      <header class="topbar card">
-        <div class="title-section">
-          <h2 id="chatTitle">💬 聊天室</h2>
-          <p id="chatSubtitle" class="subtitle">选择聊天模式开始交流</p>
+    <section class="workbench">
+      <header class="topbar">
+        <div class="brand">
+          <span class="paw-large">🐾</span>
+          <div><h1><span>Neko</span>Chat</h1><p>一起轻松聊天吧</p></div>
         </div>
-        
-        <div class="mode-selector">
-          <button class="mode-btn active" data-mode="public">🌟 公聊</button>
-          <button class="mode-btn" data-mode="private">💌 私聊</button>
-          <button class="mode-btn" data-mode="group">👥 群聊</button>
-        </div>
-        <button id="loadHistoryBtn" class="btn btn-secondary btn-sm history-btn">📜 加载历史</button>
+        <label class="search-box">
+          <span>⌕</span>
+          <input id="globalSearchInput" type="search" placeholder="搜索会话、联系人或群组..." />
+          <kbd>Ctrl K</kbd>
+        </label>
+        <nav class="top-nav">
+          <button class="top-nav-btn active" type="button" data-mode="public"><span>●</span>聊天</button>
+          <button class="top-nav-btn" type="button" id="contactsTopBtn"><span>♙</span>联系人</button>
+          <button class="top-nav-btn" type="button" data-mode="group" id="groupsTopBtn"><span>☷</span>群组</button>
+          <button class="top-nav-btn" type="button" id="discoverTopBtn"><span>◉</span>发现</button>
+          <button class="top-nav-btn" type="button" id="settingsTopBtn"><span>⚙</span>设置</button>
+        </nav>
+        <button id="loadHistoryBtn" class="icon-btn" type="button" title="加载历史">↻</button>
+        <button id="logoutBtn" class="icon-btn" type="button" title="退出">⎋</button>
+        <button id="headerAvatarBtn" class="header-avatar" type="button" title="个人简介"></button>
       </header>
 
-      <!-- 消息列表 -->
-      <section id="messageList" class="messages card">
-        <div class="msg system">
-          🎉 欢迎来到 IM System Web UI，已连接后端服务。
-        </div>
-      </section>
+      <main class="main-grid">
+        <aside class="chat-list-panel">
+          <button id="newMessageBtn" class="new-message" type="button"><span>＋</span>新建消息 <b>⌄</b></button>
+          <div class="side-actions">
+            <button id="refreshOnlineBtn" class="mini-action" type="button">刷新在线</button>
+            <button id="openAddFriendBtn" class="mini-action" type="button">添加好友</button>
+          </div>
+          <div class="tabs">
+            <button class="tab active" type="button" data-filter="all">全部</button>
+            <button class="tab" type="button" data-filter="online">在线</button>
+            <button class="tab" type="button" data-filter="friends">好友</button>
+          </div>
+          <div class="list-heading"><span>⚑ 在线联系人</span><b id="onlineCount">0</b></div>
+          <ul id="onlineList" class="session-list"></ul>
+          <div class="list-heading recent"><span>我的好友</span><b id="friendCount">0</b></div>
+          <ul id="recentList" class="session-list static-list"></ul>
+        </aside>
 
-      <!-- 输入区 -->
-      <footer class="message-composer card">
-        <div id="privateRow" class="input-row" style="display: none">
-          <label for="toUser">💌 私聊对象</label>
-          <input id="toUser" type="text" placeholder="输入用户名" class="target-input" />
-        </div>
-        <div id="groupRow" class="input-row" style="display: none">
-          <label for="toGroup">👥 群名</label>
-          <input id="toGroup" type="text" placeholder="输入群名称" class="target-input" />
-        </div>
-        <div class="input-row">
-          <textarea
-            id="messageInput"
-            rows="3"
-            placeholder="输入消息，Shift+Enter 换行，Enter 发送..."
-            class="message-textarea"
-          ></textarea>
-          <button id="sendBtn" class="btn btn-primary send-btn">🚀 发送</button>
-        </div>
+        <section class="chat-panel">
+          <header class="chat-header">
+            <button id="chatAvatarBtn" class="chat-avatar" type="button" title="查看个人简介"></button>
+            <div>
+              <h2 id="chatTitle">公共聊天室</h2>
+              <p id="chatSubtitle">在线</p>
+            </div>
+            <div class="chat-actions">
+              <button class="icon-btn" id="focusSearchBtn" type="button" title="搜索">⌕</button>
+              <button class="icon-btn" id="callBtn" type="button" title="语音">☎</button>
+              <button class="icon-btn" id="videoBtn" type="button" title="视频">▣</button>
+              <button class="icon-btn" id="clearViewBtn" type="button" title="清空当前视图">⌫</button>
+              <button class="icon-btn" id="moreBtn" type="button" title="添加当前联系人为好友">＋</button>
+            </div>
+          </header>
+          <div id="targetBar" class="target-bar">
+            <label id="privateRow">私聊对象 <input id="toUser" type="text" placeholder="输入用户名" /></label>
+            <label id="groupRow">群组名称 <input id="toGroup" type="text" placeholder="输入群组名" /></label>
+          </div>
+          <section id="messageList" class="messages"></section>
+          <footer class="composer">
+            <button id="quickAddBtn" class="round-btn" type="button">#</button>
+            <button id="emojiBtn" class="round-btn" type="button">☺</button>
+            <textarea id="messageInput" rows="1" placeholder="输入消息，Enter 发送，Shift + Enter 换行"></textarea>
+            <button id="sendBtn" class="send-btn" type="button">➤</button>
+          </footer>
+        </section>
+
+        <aside class="profile-card">
+          <div class="profile-cover"></div>
+          <div class="profile-body">
+            <button id="profileAvatarBtn" class="profile-avatar" type="button" title="查看个人简介"></button>
+            <h3 id="userNameDisplay">未登录</h3>
+            <p id="userStatus" class="online">离线</p>
+            <p id="profileSignature" class="signature">把简单的事情做漂亮 🌸</p>
+            <dl class="profile-meta">
+              <div><dt>用户名</dt><dd id="profileUsername">@guest</dd></div>
+              <div><dt>位置</dt><dd>中国</dd></div>
+              <div><dt>时区</dt><dd>Asia/Shanghai</dd></div>
+              <div><dt>登录日期</dt><dd id="profileSince">今天</dd></div>
+            </dl>
+            <div class="stats">
+              <div><span>消息</span><b id="statMessages">0</b></div>
+              <div><span>群组</span><b id="statGroups">0</b></div>
+              <div><span>好友</span><b id="statFriends">0</b></div>
+            </div>
+            <button id="viewProfileBtn" class="profile-action" type="button">查看个人简介</button>
+          </div>
+        </aside>
+      </main>
+    </section>
+  </div>
+
+  <dialog id="profileDialog" class="app-dialog">
+    <form method="dialog" class="dialog-card">
+      <header><h2>个人简介</h2><button class="close-dialog" value="cancel">×</button></header>
+      <div class="profile-editor">
+        <div id="profileDialogAvatar" class="dialog-avatar"></div>
+        <label>昵称 <input id="profileNameInput" type="text" /></label>
+        <label>性别 <input id="profileGenderInput" type="text" placeholder="可选" /></label>
+        <label>签名 <textarea id="profileSignatureInput" rows="3" placeholder="写一句简介"></textarea></label>
+        <label class="avatar-upload">
+          <input id="settingsAvatarUpload" type="file" accept="image/*" />
+          <span id="settingsAvatarPreview" class="avatar-preview">📷</span>
+          <small>点击更换头像</small>
+        </label>
+      </div>
+      <footer>
+        <button id="saveAvatarBtn" class="secondary-btn" type="button">保存头像</button>
+        <button id="saveProfileBtn" class="primary-btn" type="button">保存简介</button>
       </footer>
-    </main>
-  </div>
+    </form>
+  </dialog>
 
-  <!-- 群组管理界面 -->
-  <div id="groupsPanel" class="panel groups-panel" style="display: none">
-    <div class="panel-header">
-      <h2>📋 群组管理</h2>
-      <button class="close-btn" onclick="showPanel('chat')">&times;</button>
-    </div>
-    
-    <div class="panel-content">
-      <section class="card">
-        <h3>创建新群组</h3>
-        <div class="form-group">
-          <input id="newGroupName" type="text" placeholder="输入群组名称" />
-          <button id="createGroupBtn" class="btn btn-primary">✨ 创建</button>
-        </div>
+  <dialog id="groupsDialog" class="app-dialog">
+    <form method="dialog" class="dialog-card">
+      <header><h2>群组管理</h2><button class="close-dialog" value="cancel">×</button></header>
+      <div class="group-create">
+        <input id="newGroupName" type="text" placeholder="输入群组名" />
+        <button id="createGroupBtn" class="primary-btn" type="button">创建</button>
+        <button id="joinGroupBtn" class="secondary-btn" type="button">加入</button>
+      </div>
+      <div class="group-create compact">
+        <input id="inviteMemberName" type="text" placeholder="邀请成员用户名" />
+        <input id="inviteGroupName" type="text" placeholder="目标群组名" />
+        <button id="inviteGroupBtn" class="secondary-btn" type="button">邀请</button>
+      </div>
+      <ul id="myGroupsList" class="group-list"></ul>
+    </form>
+  </dialog>
+
+  <dialog id="contactsDialog" class="app-dialog">
+    <form method="dialog" class="dialog-card">
+      <header><h2>联系人</h2><button class="close-dialog" value="cancel">×</button></header>
+      <div class="group-create">
+        <input id="friendNameInput" type="text" placeholder="输入用户名添加好友" />
+        <button id="addFriendBtn" class="primary-btn" type="button">添加</button>
+        <button id="reloadFriendsBtn" class="secondary-btn" type="button">刷新</button>
+      </div>
+      <ul id="friendsList" class="group-list"></ul>
+    </form>
+  </dialog>
+
+  <dialog id="settingsDialog" class="app-dialog">
+    <form method="dialog" class="dialog-card">
+      <header><h2>界面设置</h2><button class="close-dialog" value="cancel">×</button></header>
+      <label class="switch-row"><span>深色模式</span><input id="darkModeToggle" type="checkbox" /></label>
+      <label class="switch-row"><span>消息声音</span><input id="soundToggle" type="checkbox" checked /></label>
+      <label class="range-row"><span>字体大小</span><input id="fontSizeSlider" min="12" max="18" value="14" type="range" /><b id="fontSizeValue">14px</b></label>
+    </form>
+  </dialog>
+
+  <dialog id="discoverDialog" class="app-dialog">
+    <form method="dialog" class="dialog-card discover-card">
+      <header><h2>发现</h2><button class="close-dialog" value="cancel">×</button></header>
+      <section class="discover-grid">
+        <button id="discoverPublicBtn" class="discover-tile" type="button">
+          <b>公共频道</b>
+          <span>查看所有在线用户可见的消息</span>
+        </button>
+        <button id="discoverOnlineBtn" class="discover-tile" type="button">
+          <b>在线用户</b>
+          <span id="discoverOnlineCount">0 人在线</span>
+        </button>
+        <button id="discoverFriendsBtn" class="discover-tile" type="button">
+          <b>我的好友</b>
+          <span id="discoverFriendCount">0 位好友</span>
+        </button>
+        <button id="discoverGroupsBtn" class="discover-tile" type="button">
+          <b>我的群组</b>
+          <span id="discoverGroupCount">0 个群组</span>
+        </button>
       </section>
-
-      <section class="card">
-        <h3>我的群组</h3>
-        <ul id="myGroupsList" class="group-list">
-          <li class="empty">暂无群组</li>
-        </ul>
+      <section class="discover-section">
+        <h3>当前在线</h3>
+        <ul id="discoverOnlineList" class="group-list"></ul>
       </section>
-    </div>
-  </div>
+      <footer>
+        <button id="discoverRefreshBtn" class="secondary-btn" type="button">刷新发现</button>
+        <button id="discoverAddFriendBtn" class="primary-btn" type="button">添加好友</button>
+      </footer>
+    </form>
+  </dialog>
 
-  <!-- 设置界面 -->
-  <div id="settingsPanel" class="panel settings-panel" style="display: none">
-    <div class="panel-header">
-      <h2>🎨 界面设置</h2>
-      <button class="close-btn" onclick="showPanel('chat')">&times;</button>
-    </div>
-    
-    <div class="panel-content">
-      <section class="card">
-        <h3>主题设置</h3>
-        <label class="checkbox-label">
-          <input type="checkbox" id="darkModeToggle" />
-          深色模式
-        </label>
-      </section>
-
-      <section class="card">
-        <h3>消息设置</h3>
-        <label class="checkbox-label">
-          <input type="checkbox" id="soundToggle" checked />
-          消息声音提示
-        </label>
-        <label class="checkbox-label">
-          <input type="checkbox" id="notificationToggle" checked />
-          浏览器通知
-        </label>
-      </section>
-
-      <section class="card">
-        <h3>显示设置</h3>
-        <label>字体大小</label>
-        <div class="slider">
-          <input type="range" id="fontSizeSlider" min="12" max="18" value="14" />
-          <span id="fontSizeValue">14px</span>
-        </div>
-      </section>
-
-      <section class="card">
-        <h3>头像设置</h3>
-        <div class="avatar-upload-container">
-          <input
-            id="settingsAvatarUpload"
-            type="file"
-            accept="image/*"
-            class="avatar-file-input"
-          />
-          <div class="avatar-preview" id="settingsAvatarPreview"></div>
-          <p class="upload-hint">点击预览框选择新头像</p>
-        </div>
-        <button id="saveAvatarBtn" class="btn btn-primary">保存头像</button>
-      </section>
-    </div>
-  </div>
-
-  <script src="./app.js"></script>
+  <div id="toastHost" class="toast-host"></div>
+  <script src="./app.js?v=20260425-ui4"></script>
 </body>
 </html>

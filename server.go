@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -285,6 +286,13 @@ func (this *Server) BroadCastFromWeb(name string, msg string, avatar string) {
 	msg = sanitizeInput(msg)
 	sendMsg := "[WEB] " + name + ": " + msg
 	fmt.Printf("[%s] Broadcast from WEB user %s: %s\n", time.Now().Format("2006-01-02 15:04:05"), name, msg)
+
+	if fromUser, err := this.DB.GetUserByUsername(name); err == nil {
+		if _, err := this.DB.SaveMessage(fromUser.ID, nil, nil, msg, "public"); err != nil {
+			fmt.Printf("Warning: Failed to save web public message: %v\n", err)
+		}
+	}
+
 	this.Message <- sendMsg
 }
 
@@ -723,7 +731,12 @@ func (this *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		userInfo, err := this.DB.GetUserByUsername(username)
+		targetUsername := strings.TrimSpace(r.URL.Query().Get("user"))
+		if targetUsername == "" {
+			targetUsername = username
+		}
+
+		userInfo, err := this.DB.GetUserByUsername(targetUsername)
 		if err != nil {
 			http.Error(w, "用户信息读取失败", http.StatusInternalServerError)
 			return
@@ -735,6 +748,8 @@ func (this *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
 			"avatar":    userInfo.Avatar,
 			"gender":    userInfo.Gender,
 			"signature": userInfo.Signature,
+			"createdAt":  userInfo.CreatedAt,
+			"isSelf":     userInfo.Username == username,
 		})
 		return
 
@@ -823,7 +838,15 @@ func (this *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 
 	typeResp := r.URL.Query().Get("type")
 	groupName := r.URL.Query().Get("group")
-	limit := 50
+	limit := 300
+	if rawLimit := strings.TrimSpace(r.URL.Query().Get("limit")); rawLimit != "" {
+		if parsedLimit, parseErr := strconv.Atoi(rawLimit); parseErr == nil && parsedLimit > 0 {
+			limit = parsedLimit
+			if limit > 500 {
+				limit = 500
+			}
+		}
+	}
 
 	var history interface{}
 	var err error
@@ -1197,7 +1220,7 @@ func (this *Server) handleCheckFriend(w http.ResponseWriter, r *http.Request) {
 
 func (this *Server) StartWeb(addr string) {
 	mux := http.NewServeMux()
-	mux.Handle("/", http.FileServer(http.Dir("./web")))
+	mux.Handle("/", noCache(http.FileServer(http.Dir("./web"))))
 	mux.HandleFunc("/api/login", this.handleLogin)
 	mux.HandleFunc("/api/logout", this.handleLogout)
 	mux.HandleFunc("/api/events", this.handleEvents)
@@ -1225,6 +1248,15 @@ func (this *Server) StartWeb(addr string) {
 	if err := http.Serve(listener, mux); err != nil {
 		fmt.Println("StartWeb serve err:", err)
 	}
+}
+
+func noCache(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+		w.Header().Set("Pragma", "no-cache")
+		w.Header().Set("Expires", "0")
+		next.ServeHTTP(w, r)
+	})
 }
 
 // 启动服务器的接口

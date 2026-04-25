@@ -1,867 +1,830 @@
-﻿// ==================== DOM 元素 ====================
+const $ = (id) => document.getElementById(id);
+
 const DOM = {
-  // 面板
-  loginPanel: document.getElementById('loginPanel'),
-  chatPanel: document.getElementById('chatPanel'),
-  groupsPanel: document.getElementById('groupsPanel'),
-  settingsPanel: document.getElementById('settingsPanel'),
-  
-  // 登录表单
-  usernameInput: document.getElementById('username'),
-  passwordInput: document.getElementById('password'),
-  connectBtn: document.getElementById('connectBtn'),
-  loginForm: document.getElementById('loginForm'),
-  
-  // 用户信息
-  userAvatar: document.getElementById('userAvatar'),
-  userNameDisplay: document.getElementById('userNameDisplay'),
-  userStatus: document.getElementById('userStatus'),
-  
-  // 聊天区域
-  onlineList: document.getElementById('onlineList'),
-  refreshBtn: document.getElementById('refreshBtn'),
-  messageList: document.getElementById('messageList'),
-  messageInput: document.getElementById('messageInput'),
-  sendBtn: document.getElementById('sendBtn'),
-  toUserInput: document.getElementById('toUser'),
-  toGroupInput: document.getElementById('toGroup'),
-  privateRow: document.getElementById('privateRow'),
-  groupRow: document.getElementById('groupRow'),
-  
-  // 模式切换
-  modeBtns: document.querySelectorAll('.mode-btn'),
-  chatTitle: document.getElementById('chatTitle'),
-  chatSubtitle: document.getElementById('chatSubtitle'),
-  
-  // 头像上传
-  loginAvatarUpload: document.getElementById('loginAvatarUpload'),
-  loginAvatarPreview: document.getElementById('loginAvatarPreview'),
-  settingsAvatarUpload: document.getElementById('settingsAvatarUpload'),
-  settingsAvatarPreview: document.getElementById('settingsAvatarPreview'),
-  saveAvatarBtn: document.getElementById('saveAvatarBtn'),
-  
-  // 其他功能
-  logoutBtn: document.getElementById('logoutBtn'),
-  showGroupsBtn: document.getElementById('showGroupsBtn'),
-  showSettingsBtn: document.getElementById('showSettingsBtn'),
-  loadHistoryBtn: document.getElementById('loadHistoryBtn'),
-  createGroupBtn: document.getElementById('createGroupBtn'),
-  newGroupNameInput: document.getElementById('newGroupName'),
-  
-  // 设置面板
-  darkModeToggle: document.getElementById('darkModeToggle'),
-  soundToggle: document.getElementById('soundToggle'),
-  fontSizeSlider: document.getElementById('fontSizeSlider'),
-  fontSizeValue: document.getElementById('fontSizeValue')
+  loginPanel: $('loginPanel'),
+  appPanel: $('appPanel'),
+  loginForm: $('loginForm'),
+  username: $('username'),
+  password: $('password'),
+  connectBtn: $('connectBtn'),
+  registerBtn: $('registerBtn'),
+  loginAvatarUpload: $('loginAvatarUpload'),
+  loginAvatarPreview: $('loginAvatarPreview'),
+  settingsAvatarUpload: $('settingsAvatarUpload'),
+  settingsAvatarPreview: $('settingsAvatarPreview'),
+  headerAvatarBtn: $('headerAvatarBtn'),
+  chatAvatarBtn: $('chatAvatarBtn'),
+  profileAvatarBtn: $('profileAvatarBtn'),
+  profileDialogAvatar: $('profileDialogAvatar'),
+  userNameDisplay: $('userNameDisplay'),
+  userStatus: $('userStatus'),
+  profileUsername: $('profileUsername'),
+  profileSignature: $('profileSignature'),
+  profileSince: $('profileSince'),
+  chatTitle: $('chatTitle'),
+  chatSubtitle: $('chatSubtitle'),
+  messageList: $('messageList'),
+  messageInput: $('messageInput'),
+  sendBtn: $('sendBtn'),
+  toUser: $('toUser'),
+  toGroup: $('toGroup'),
+  privateRow: $('privateRow'),
+  groupRow: $('groupRow'),
+  targetBar: $('targetBar'),
+  onlineList: $('onlineList'),
+  recentList: $('recentList'),
+  onlineCount: $('onlineCount'),
+  friendCount: $('friendCount'),
+  statFriends: $('statFriends'),
+  globalSearchInput: $('globalSearchInput'),
+  newMessageBtn: $('newMessageBtn'),
+  refreshOnlineBtn: $('refreshOnlineBtn'),
+  openAddFriendBtn: $('openAddFriendBtn'),
+  loadHistoryBtn: $('loadHistoryBtn'),
+  logoutBtn: $('logoutBtn'),
+  profileDialog: $('profileDialog'),
+  groupsDialog: $('groupsDialog'),
+  contactsDialog: $('contactsDialog'),
+  settingsDialog: $('settingsDialog'),
+  discoverDialog: $('discoverDialog'),
+  discoverPublicBtn: $('discoverPublicBtn'),
+  discoverOnlineBtn: $('discoverOnlineBtn'),
+  discoverFriendsBtn: $('discoverFriendsBtn'),
+  discoverGroupsBtn: $('discoverGroupsBtn'),
+  discoverRefreshBtn: $('discoverRefreshBtn'),
+  discoverAddFriendBtn: $('discoverAddFriendBtn'),
+  discoverOnlineCount: $('discoverOnlineCount'),
+  discoverFriendCount: $('discoverFriendCount'),
+  discoverGroupCount: $('discoverGroupCount'),
+  discoverOnlineList: $('discoverOnlineList'),
+  viewProfileBtn: $('viewProfileBtn'),
+  saveProfileBtn: $('saveProfileBtn'),
+  saveAvatarBtn: $('saveAvatarBtn'),
+  profileNameInput: $('profileNameInput'),
+  profileGenderInput: $('profileGenderInput'),
+  profileSignatureInput: $('profileSignatureInput'),
+  myGroupsList: $('myGroupsList'),
+  newGroupName: $('newGroupName'),
+  createGroupBtn: $('createGroupBtn'),
+  joinGroupBtn: $('joinGroupBtn'),
+  inviteMemberName: $('inviteMemberName'),
+  inviteGroupName: $('inviteGroupName'),
+  inviteGroupBtn: $('inviteGroupBtn'),
+  friendsList: $('friendsList'),
+  friendNameInput: $('friendNameInput'),
+  addFriendBtn: $('addFriendBtn'),
+  reloadFriendsBtn: $('reloadFriendsBtn'),
+  darkModeToggle: $('darkModeToggle'),
+  soundToggle: $('soundToggle'),
+  fontSizeSlider: $('fontSizeSlider'),
+  fontSizeValue: $('fontSizeValue'),
+  statMessages: $('statMessages'),
+  statGroups: $('statGroups'),
+  toastHost: $('toastHost')
 };
 
-// 创建注册按钮
-const registerBtn = document.createElement('button');
-registerBtn.id = 'registerBtn';
-registerBtn.type = 'button';
-registerBtn.className = 'btn btn-secondary btn-lg';
-registerBtn.textContent = '📝 注册新用户';
-registerBtn.style.marginTop = '10px';
-registerBtn.style.width = '100%';
-DOM.loginForm.appendChild(registerBtn);
+const state = {
+  token: '',
+  username: '',
+  avatar: '🐱',
+  gender: '',
+  signature: '',
+  mode: 'public',
+  selectedPeer: '',
+  selectedPeerAvatar: '🐱',
+  groups: [],
+  friends: [],
+  onlineUsers: [],
+  messages: 0,
+  uploadedAvatar: '',
+  eventSource: null
+};
 
-// 别名以保持向后兼容
-const loginPanel = DOM.loginPanel;
-const chatPanel = DOM.chatPanel;
-const groupsPanel = DOM.groupsPanel;
-const settingsPanel = DOM.settingsPanel;
-const usernameInput = DOM.usernameInput;
-const passwordInput = DOM.passwordInput;
-const connectBtn = DOM.connectBtn;
-const logoutBtn = DOM.logoutBtn;
-const userAvatar = DOM.userAvatar;
-const userNameDisplay = DOM.userNameDisplay;
-const userStatus = DOM.userStatus;
-const onlineList = DOM.onlineList;
-const refreshBtn = DOM.refreshBtn;
-const messageList = DOM.messageList;
-const messageInput = DOM.messageInput;
-const sendBtn = DOM.sendBtn;
-const toUserInput = DOM.toUserInput;
-const toGroupInput = DOM.toGroupInput;
-const privateRow = DOM.privateRow;
-const groupRow = DOM.groupRow;
-const modeBtns = DOM.modeBtns;
-const chatTitle = DOM.chatTitle;
-const chatSubtitle = DOM.chatSubtitle;
-const loginAvatarUpload = DOM.loginAvatarUpload;
-const loginAvatarPreview = DOM.loginAvatarPreview;
-const settingsAvatarUpload = DOM.settingsAvatarUpload;
-const settingsAvatarPreview = DOM.settingsAvatarPreview;
-const saveAvatarBtn = DOM.saveAvatarBtn;
-const showGroupsBtn = DOM.showGroupsBtn;
-const showSettingsBtn = DOM.showSettingsBtn;
-const loadHistoryBtn = DOM.loadHistoryBtn;
-const createGroupBtn = DOM.createGroupBtn;
-const newGroupNameInput = DOM.newGroupNameInput;
-const darkModeToggle = DOM.darkModeToggle;
-const soundToggle = DOM.soundToggle;
-const fontSizeSlider = DOM.fontSizeSlider;
-const fontSizeValue = DOM.fontSizeValue;
-
-// ==================== 全局变量 ====================
-let mode = 'public';
-let eventSource = null;
-let authToken = '';
-let currentUsername = '';
-let currentPassword = '';
-let currentAvatar = '';
-let uploadedAvatarBase64 = null;
-let myGroups = [];
-let isLoading = false;
-
-// ==================== 工具函数 ====================
-
-/**
- * 转义 HTML 特殊字符，防止 XSS 攻击
- */
-function escapeHtml(text) {
+function escapeHtml(value) {
   const div = document.createElement('div');
-  div.textContent = text;
+  div.textContent = value ?? '';
   return div.innerHTML;
 }
 
-/**
- * 显示/隐藏面板
- */
-function showPanel(panelName) {
-  loginPanel.style.display = panelName === 'login' ? 'flex' : 'none';
-  chatPanel.style.display = panelName === 'chat' ? 'flex' : 'none';
-  groupsPanel.style.display = panelName === 'groups' ? 'flex' : 'none';
-  settingsPanel.style.display = panelName === 'settings' ? 'flex' : 'none';
+function avatarMarkup(avatar, label = '头像') {
+  if (avatar && avatar.startsWith('data:')) return `<img src="${escapeHtml(avatar)}" alt="${label}" />`;
+  return `<span>${escapeHtml(avatar || '🐱')}</span>`;
 }
 
-/**
- * 显示提示信息
- */
-function showNotification(message, type = 'info') {
-  // 记录到控制台
-  if (type === 'error') {
-    console.error(`[错误] ${message}`);
-  } else if (type === 'warn') {
-    console.warn(`[警告] ${message}`);
-  } else {
-    console.log(`[信息] ${message}`);
-  }
-  
-  // 也显示为 alert（可后续改进为 toast 通知）
-  if (type === 'error') {
-    alert(`❌ 错误: ${message}`);
-  } else if (type === 'warn') {
-    alert(`⚠️ 警告: ${message}`);
-  }
-  // info 类型不显示 alert，只记录到控制台
+function setAvatar(el, avatar) {
+  if (el) el.innerHTML = avatarMarkup(avatar);
 }
 
-/**
- * 渲染头像 HTML
- */
-function renderAvatar(avatar) {
-  if (!avatar) {
-    return '<span>👤</span>';
-  }
-  if (avatar.startsWith('data:')) {
-    return `<img src="${escapeHtml(avatar)}" style="width:100%;height:100%;border-radius:50%;object-fit:cover;" />`;
-  }
-  return `<span>${escapeHtml(avatar)}</span>`;
+function toast(message, type = 'info') {
+  const el = document.createElement('div');
+  el.className = `toast ${type}`;
+  el.textContent = message;
+  DOM.toastHost.appendChild(el);
+  window.setTimeout(() => el.remove(), 2800);
 }
 
-/**
- * 添加消息到聊天框
- */
-function addMsg(text, type = 'incoming') {
-  const msgDiv = document.createElement('div');
-  msgDiv.className = `msg ${type}`;
-
-  if (text.startsWith('[私聊]')) {
-    msgDiv.classList.add('private');
-  } else if (text.startsWith('[群聊') || text.includes('[群聊')) {
-    msgDiv.classList.add('group');
-  } else if (text.includes(`我:`) || text.includes(`我 ->`)) {
-    msgDiv.classList.add('outgoing');
-  }
-
-  msgDiv.textContent = escapeHtml(text);
-  messageList.appendChild(msgDiv);
-  messageList.scrollTop = messageList.scrollHeight;
-}
-
-/**
- * 更新聊天标题
- */
-function updateTitle() {
-  const titles = {
-    public: { title: '💬 聊天室', subtitle: '所有人都能看到的公聊内容' },
-    private: { title: '💌 私聊', subtitle: '选择一个用户进行私密对话' },
-    group: { title: '👥 群聊', subtitle: '加入群组与伙伴们交流' }
-  };
-  chatTitle.textContent = titles[mode].title;
-  chatSubtitle.textContent = titles[mode].subtitle;
-}
-
-/**
- * 更新 UI 根据当前模式
- */
-function updateUIForMode() {
-  privateRow.style.display = mode === 'private' ? 'flex' : 'none';
-  groupRow.style.display = mode === 'group' ? 'flex' : 'none';
-  
-  if (mode === 'private') {
-    toUserInput.placeholder = '输入用户名';
-  } else if (mode === 'group') {
-    toGroupInput.placeholder = '输入群名';
-  }
-  updateTitle();
-}
-
-/**
- * 统一的 API 调用函数
- */
-async function apiCall(endpoint, options = {}) {
-  try {
-    isLoading = true;
-    
-    // 正确构建 fetch 配置对象，避免属性覆盖
-    const { method = 'GET', headers = {}, body, ...rest } = options;
-    
-    const config = {
-      method,
-      headers: {
-        'Content-Type': 'application/json',
-        ...headers
-      },
-      ...rest
-    };
-    
-    // 处理 body：如果是对象则转换为 JSON 字符串
-    if (body !== undefined) {
-      config.body = typeof body === 'object' ? JSON.stringify(body) : body;
-    }
-    
-    console.log(`[API] ${method} ${endpoint}`, config.body ? JSON.parse(config.body) : '');
-    
-    const response = await fetch(endpoint, config);
-    
-    if (!response.ok) {
-      const error = await response.text();
-      console.error(`[API Error] ${response.status}: ${error}`);
-      throw new Error(error || `HTTP ${response.status}`);
-    }
-    
-    const contentType = response.headers.get('content-type');
-    if (contentType && contentType.includes('application/json')) {
-      const data = await response.json();
-      console.log(`[API Response] ${endpoint}`, data);
-      return data;
-    }
-    
+async function api(endpoint, options = {}) {
+  const response = await fetch(endpoint, {
+    method: options.method || 'GET',
+    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+    body: options.body ? JSON.stringify(options.body) : undefined
+  });
+  if (!response.ok) {
     const text = await response.text();
-    console.log(`[API Response] ${endpoint}`, text);
-    return text;
-  } catch (err) {
-    showNotification(`API 错误: ${err.message}`, 'error');
-    throw err;
-  } finally {
-    isLoading = false;
+    throw new Error(text || `HTTP ${response.status}`);
   }
+  if (response.status === 204) return null;
+  const contentType = response.headers.get('content-type') || '';
+  return contentType.includes('application/json') ? response.json() : response.text();
 }
 
-/**
- * 设置用户头像显示
- */
-function setUserAvatar(avatar) {
-  currentAvatar = avatar;
-  userAvatar.innerHTML = renderAvatar(avatar);
+function showApp() {
+  DOM.loginPanel.hidden = true;
+  DOM.appPanel.hidden = false;
 }
 
-function getAvatarLabel(avatar) {
-  if (!avatar) {
-    return '👤';
-  }
-  if (avatar.startsWith('data:')) {
-    return '👤';
-  }
-  return escapeHtml(avatar);
+function showLogin() {
+  DOM.loginPanel.hidden = false;
+  DOM.appPanel.hidden = true;
 }
 
-// ==================== 事件监听 ====================
+function nowLabel(dateLike) {
+  const date = dateLike ? new Date(dateLike) : new Date();
+  if (Number.isNaN(date.getTime())) return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
 
-// 登录事件
-connectBtn.addEventListener('click', async () => {
-  const name = usernameInput.value.trim();
-  const password = passwordInput.value.trim();
-  
-  if (!name || !password) {
-    showNotification('用户名和密码不能为空', 'warn');
+function setMessageCount(nextValue) {
+  state.messages = nextValue;
+  DOM.statMessages.textContent = state.messages.toLocaleString();
+}
+
+function emptyState(title, detail = '', tag = 'div') {
+  return `
+    <${tag} class="empty-state">
+      <strong>${escapeHtml(title)}</strong>
+      ${detail ? `<span>${escapeHtml(detail)}</span>` : ''}
+    </${tag}>
+  `;
+}
+
+function resetMessages(title = '暂无消息', detail = '发送第一条消息开始聊天。') {
+  setMessageCount(0);
+  DOM.messageList.innerHTML = `<div class="day-pill">今天</div>${emptyState(title, detail)}`;
+}
+
+function addMessage({ text, type = 'incoming', avatar = '', time = nowLabel(), system = false, sender = '' }) {
+  DOM.messageList.querySelector('.empty-state')?.remove();
+  if (system) {
+    const el = document.createElement('div');
+    el.className = 'system-msg';
+    el.textContent = text;
+    DOM.messageList.appendChild(el);
+    DOM.messageList.scrollTop = DOM.messageList.scrollHeight;
     return;
   }
-  
-  if (name.length > 50 || password.length > 100) {
-    showNotification('用户名或密码过长', 'warn');
-    return;
-  }
-  
-  currentUsername = name;
-  currentPassword = password;
-  await connect();
-});
 
-// 注册事件
-registerBtn.addEventListener('click', async () => {
-  const name = usernameInput.value.trim();
-  const password = passwordInput.value.trim();
-  
-  if (!name || !password) {
-    showNotification('用户名和密码不能为空', 'warn');
-    return;
-  }
-
-  if (password.length < 6) {
-    showNotification('密码至少需要6个字符', 'warn');
-    return;
-  }
-
-  if (name.length > 50) {
-    showNotification('用户名过长', 'warn');
-    return;
-  }
-  
-  try {
-    const avatarToUse = uploadedAvatarBase64 || '👤';
-    const response = await fetch('/api/register', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: name, password: password, avatar: avatarToUse })
-    });
-
-    if (!response.ok) {
-      const error = await response.text();
-      showNotification(`注册失败: ${error}`, 'error');
-      return;
-    }
-
-    showNotification('注册成功！请使用您的凭据登录。', 'info');
-    uploadedAvatarBase64 = null;
-    loginAvatarPreview.innerHTML = '📷';
-  } catch (err) {
-    console.error('注册失败:', err);
-    showNotification(`注册失败: ${err.message}`, 'error');
-  }
-});
-
-// ==================== 头像文件上传处理 ====================
-function handleAvatarFileSelect(fileInput, preview) {
-  fileInput.addEventListener('change', (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
-
-    // 验证文件大小
-    const maxSize = 2 * 1024 * 1024; // 2MB
-    if (file.size > maxSize) {
-      showNotification(`图片太大（${(file.size / 1024 / 1024).toFixed(2)}MB），请选择小于 2MB 的图片`, 'warn');
-      fileInput.value = '';
-      return;
-    }
-
-    // 验证文件类型
-    const validTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp'];
-    if (!validTypes.includes(file.type)) {
-      showNotification(`不支持的图片格式。支持的格式: JPG, PNG, GIF, WebP`, 'warn');
-      fileInput.value = '';
-      return;
-    }
-
-    const reader = new FileReader();
-    reader.onload = (event) => {
-      const base64Data = event.target.result;
-      uploadedAvatarBase64 = base64Data;
-      
-      const img = document.createElement('img');
-      img.src = base64Data;
-      img.style.width = '100%';
-      img.style.height = '100%';
-      img.style.borderRadius = '50%';
-      img.style.objectFit = 'cover';
-      preview.innerHTML = '';
-      preview.appendChild(img);
-    };
-    reader.onerror = () => {
-      showNotification('读取文件失败', 'error');
-      fileInput.value = '';
-    };
-    reader.readAsDataURL(file);
+  const row = document.createElement('div');
+  row.className = `message-row ${type}`;
+  const profileTarget = sender || (type === 'outgoing' ? state.username : state.selectedPeer);
+  row.innerHTML = `
+    <button class="mini-avatar" type="button" title="查看资料">${avatarMarkup(avatar)}</button>
+    <article class="bubble">
+      <p>${escapeHtml(text)}</p>
+      <time>${escapeHtml(time)}</time>
+    </article>
+  `;
+  row.querySelector('.mini-avatar').addEventListener('click', () => {
+    if (profileTarget) openProfile(profileTarget);
   });
+  DOM.messageList.appendChild(row);
+  DOM.messageList.scrollTop = DOM.messageList.scrollHeight;
+  setMessageCount(state.messages + 1);
+}
 
-  preview.addEventListener('click', () => {
-    fileInput.click();
+function updateChatTitle() {
+  if (state.mode === 'private') {
+    const peer = DOM.toUser.value.trim() || state.selectedPeer || '选择联系人';
+    DOM.chatTitle.textContent = peer;
+    DOM.chatSubtitle.textContent = peer === '选择联系人' ? '从在线列表或联系人中选择用户' : '私聊会话';
+    return;
+  }
+  if (state.mode === 'group') {
+    const group = DOM.toGroup.value.trim() || '群组会话';
+    DOM.chatTitle.textContent = group;
+    DOM.chatSubtitle.textContent = '群组消息频道';
+    return;
+  }
+  DOM.chatTitle.textContent = '公共聊天室';
+  DOM.chatSubtitle.textContent = '所有在线用户可见';
+}
+
+function setMode(nextMode) {
+  state.mode = nextMode;
+  document.querySelectorAll('[data-mode]').forEach((btn) => btn.classList.toggle('active', btn.dataset.mode === nextMode));
+  document.querySelectorAll('[data-mode-jump]').forEach((btn) => btn.classList.toggle('active', btn.dataset.modeJump === nextMode));
+  DOM.privateRow.style.display = nextMode === 'private' ? 'flex' : 'none';
+  DOM.groupRow.style.display = nextMode === 'group' ? 'flex' : 'none';
+  DOM.targetBar.classList.toggle('visible', nextMode !== 'public');
+  if (nextMode === 'public') setAvatar(DOM.chatAvatarBtn, '🐾');
+  updateChatTitle();
+}
+
+function selectPeer(name, avatar) {
+  state.selectedPeer = name;
+  state.selectedPeerAvatar = avatar || '🐱';
+  DOM.toUser.value = name;
+  setMode('private');
+  setAvatar(DOM.chatAvatarBtn, state.selectedPeerAvatar);
+  document.querySelectorAll('.session-card').forEach((item) => {
+    item.classList.toggle('active', item.dataset.name === name.toLowerCase());
   });
+  loadHistory('private', name).catch((err) => toast(err.message, 'error'));
 }
 
-handleAvatarFileSelect(loginAvatarUpload, loginAvatarPreview);
-handleAvatarFileSelect(settingsAvatarUpload, settingsAvatarPreview);
-
-saveAvatarBtn.addEventListener('click', async () => {
-  if (!authToken) {
-    showNotification('请先登录后再修改头像', 'warn');
-    return;
-  }
-
-  if (!uploadedAvatarBase64) {
-    showNotification('请先选择一个头像图片', 'warn');
-    return;
-  }
-
-  try {
-    await apiCall('/api/avatar', {
-      method: 'POST',
-      body: { token: authToken, avatar: uploadedAvatarBase64 }
-    });
-
-    setUserAvatar(uploadedAvatarBase64);
-    uploadedAvatarBase64 = null;
-    settingsAvatarPreview.innerHTML = '📷';
-    addMsg('头像更新成功！', 'system');
-  } catch (err) {
-    showNotification(`更新头像失败: ${err.message}`, 'error');
-  }
-});
-
-// 连接到 SSE 服务
-async function connect() {
-  if (eventSource) eventSource.close();
-
-  try {
-    console.log('开始登录...', { username: currentUsername });
-    
-    const result = await apiCall('/api/login', {
-      method: 'POST',
-      body: { username: currentUsername, password: currentPassword }
-    });
-
-    console.log('登录成功，收到响应:', result);
-    
-    if (!result || !result.token) {
-      throw new Error('服务器响应异常：缺少 token');
-    }
-    
-    authToken = result.token;
-    setUserAvatar(result.avatar || '👤');
-
-    console.log('正在连接到事件流...');
-    
-    eventSource = new EventSource(`/api/events?token=${encodeURIComponent(authToken)}`);
-
-    eventSource.onopen = () => {
-      console.log('SSE 连接已建立');
-    };
-
-    eventSource.onmessage = (event) => {
-      console.log('收到公聊消息:', event.data);
-      addMsg(event.data, 'incoming');
-    };
-
-    eventSource.addEventListener('system', (event) => {
-      console.log('收到系统消息:', event.data);
-      addMsg(event.data, 'system');
-    });
-
-    eventSource.onerror = (err) => {
-      console.error('SSE 连接错误:', err);
-      addMsg('连接断开，请重新登录', 'system');
-      if (eventSource) eventSource.close();
-      showPanel('login');
-    };
-
-    userNameDisplay.textContent = currentUsername;
-    userStatus.textContent = '🟢 在线';
-    showPanel('chat');
-    
-    console.log('正在加载在线用户列表和群组...');
-    await refreshOnlineList();
-    await refreshGroupList();
-    await loadHistory('public');
-    
-    console.log('登录完成！');
-  } catch (err) {
-    console.error('登录失败:', err);
-    showNotification(`登录失败: ${err.message}`, 'error');
-  }
-}
-
-// 模式切换
-modeBtns.forEach(btn => {
-  btn.addEventListener('click', () => {
-    modeBtns.forEach(b => b.classList.remove('active'));
-    btn.classList.add('active');
-    mode = btn.dataset.mode;
-    updateUIForMode();
+function sessionItem(session) {
+  const li = document.createElement('li');
+  li.className = 'session-card';
+  li.dataset.name = session.name.toLowerCase();
+  li.dataset.filter = session.filter || 'online';
+  li.innerHTML = `
+    <button class="session-avatar" type="button" title="查看资料">${avatarMarkup(session.avatar)}</button>
+    <div class="session-info">
+      <div class="session-head">
+        <span class="session-name">${escapeHtml(session.name)}${session.friend ? '<span class="pin">★</span>' : ''}</span>
+        <span class="session-time">${escapeHtml(session.time || '')}</span>
+      </div>
+      <p class="session-preview">${escapeHtml(session.text || '')}</p>
+    </div>
+    ${session.online ? '<span class="online-dot"></span>' : '<span></span>'}
+  `;
+  li.querySelector('.session-avatar').addEventListener('click', (event) => {
+    event.stopPropagation();
+    openProfile(session.name);
   });
-});
-
-// 刷新在线用户列表
-async function refreshOnlineList() {
-  try {
-    const data = await apiCall('/api/online');
-    onlineList.innerHTML = '';
-    
-    if (data.online && data.online.length > 0) {
-      const onlineUsers = data.online.filter(user => user.name !== currentUsername);
-      
-      if (onlineUsers.length === 0) {
-        const li = document.createElement('li');
-        li.className = 'loading';
-        li.textContent = '暂无其他用户在线';
-        onlineList.appendChild(li);
-        return;
-      }
-      
-      onlineUsers.forEach(user => {
-        const li = document.createElement('li');
-        li.innerHTML = `${renderAvatar(user.avatar)} <span>${escapeHtml(user.name)}</span>`;
-        li.title = user.name;
-        li.addEventListener('click', () => {
-          toUserInput.value = user.name;
-          mode = 'private';
-          modeBtns.forEach(b => b.classList.remove('active'));
-          document.querySelector('[data-mode="private"]').classList.add('active');
-          updateUIForMode();
-        });
-        onlineList.appendChild(li);
-      });
-    } else {
-      const li = document.createElement('li');
-      li.className = 'loading';
-      li.textContent = '暂无用户在线';
-      onlineList.appendChild(li);
-    }
-  } catch (err) {
-    console.error('刷新在线列表失败:', err);
-    showNotification('刷新在线列表失败', 'error');
-  }
+  li.addEventListener('click', () => selectPeer(session.name, session.avatar));
+  return li;
 }
 
-refreshBtn.addEventListener('click', refreshOnlineList);
+function renderSessionList() {
+  const online = state.onlineUsers.filter((user) => user.name !== state.username);
+  const friendsByName = new Map(state.friends.map((friend) => [friend.name, friend]));
+  DOM.onlineCount.textContent = online.length.toLocaleString();
+  DOM.friendCount.textContent = state.friends.length.toLocaleString();
+  DOM.statFriends.textContent = state.friends.length.toLocaleString();
 
-// 验证消息内容
-function validateMessage(text, mode) {
-  if (!text) {
-    return { valid: false, message: '消息不能为空' };
-  }
-  
-  if (text.length > 10000) {
-    return { valid: false, message: '消息过长（最多 10000 个字符）' };
-  }
-  
-  if (mode === 'private' && !toUserInput.value.trim()) {
-    return { valid: false, message: '请输入私聊用户名' };
-  }
-  
-  if (mode === 'group' && !toGroupInput.value.trim()) {
-    return { valid: false, message: '请输入群名' };
-  }
-  
-  return { valid: true };
-}
-
-// 发送消息
-sendBtn.addEventListener('click', sendMessage);
-messageInput.addEventListener('keypress', (e) => {
-  if (e.key === 'Enter' && !e.shiftKey && !isLoading) {
-    e.preventDefault();
-    sendMessage();
-  }
-});
-
-async function sendMessage() {
-  const text = messageInput.value.trim();
-  const validation = validateMessage(text, mode);
-  
-  if (!validation.valid) {
-    showNotification(validation.message, 'warn');
-    return;
-  }
-
-  const payload = {
-    token: authToken,
-    name: currentUsername,
-    message: text,
-    mode
-  };
-
-  if (mode === 'private') {
-    payload.to = toUserInput.value.trim();
-  } else if (mode === 'group') {
-    payload.to = toGroupInput.value.trim();
-  }
-
-  try {
-    await apiCall('/api/send', {
-      method: 'POST',
-      body: payload
-    });
-
-    messageInput.value = '';
-    let displayText = escapeHtml(text);
-    
-    const avatarLabel = getAvatarLabel(currentAvatar);
-    if (mode === 'private') {
-      displayText = `[私聊] ${avatarLabel} 我 -> ${escapeHtml(payload.to)}: ${displayText}`;
-      addMsg(displayText, 'private');
-    } else if (mode === 'group') {
-      displayText = `[群聊 ${escapeHtml(payload.to)}] ${avatarLabel} 我: ${displayText}`;
-      addMsg(displayText, 'group');
-    } else {
-      displayText = `${avatarLabel} 我: ${displayText}`;
-      addMsg(displayText, 'outgoing');
-    }
-  } catch (err) {
-    showNotification(`发送失败: ${err.message}`, 'error');
-  }
-}
-
-// 群组管理
-showGroupsBtn.addEventListener('click', async () => {
-  await refreshGroupList();
-  showPanel('groups');
-});
-showSettingsBtn.addEventListener('click', () => showPanel('settings'));
-
-createGroupBtn.addEventListener('click', async () => {
-  const groupName = newGroupNameInput.value.trim();
-  
-  if (!groupName) {
-    showNotification('请输入群组名称', 'warn');
-    return;
-  }
-  
-  if (groupName.length > 100) {
-    showNotification('群组名称过长', 'warn');
-    return;
-  }
-
-  try {
-    await apiCall('/api/group', {
-      method: 'POST',
-      body: { token: authToken, action: 'create', groupName }
-    });
-
-    newGroupNameInput.value = '';
-    addMsg(`已创建群组：${escapeHtml(groupName)}`, 'system');
-    await refreshGroupList();
-  } catch (err) {
-    showNotification(`创建群组失败: ${err.message}`, 'error');
-  }
-});
-
-function updateGroupsList() {
-  const list = document.getElementById('myGroupsList');
-  list.innerHTML = '';
-  
-  if (myGroups.length === 0) {
-    const li = document.createElement('li');
-    li.className = 'empty';
-    li.textContent = '暂无群组';
-    list.appendChild(li);
+  DOM.onlineList.innerHTML = '';
+  if (online.length === 0) {
+    DOM.onlineList.innerHTML = emptyState('暂无在线联系人', '让另一个用户登录后会出现在这里。', 'li');
   } else {
-    myGroups.forEach(groupName => {
-      const li = document.createElement('li');
-      const escapedGroupName = escapeHtml(groupName);
-      li.innerHTML = `
-        <span>👥 ${escapedGroupName}</span>
-        <div class="group-controls">
-          <button class="btn btn-sm" onclick="selectGroup('${groupName}')">进入</button>
-          <button class="btn btn-secondary btn-sm" onclick="leaveGroup('${groupName}')">离开</button>
-        </div>
-      `;
-      list.appendChild(li);
+    online.forEach((user) => {
+      DOM.onlineList.appendChild(sessionItem({
+        name: user.name,
+        avatar: user.avatar,
+        text: friendsByName.has(user.name) ? '好友在线，点击开始私聊。' : '在线用户，点击开始私聊。',
+        time: '在线',
+        online: true,
+        friend: friendsByName.has(user.name),
+        filter: friendsByName.has(user.name) ? 'friends' : 'online'
+      }));
     });
   }
+
+  DOM.recentList.innerHTML = '';
+  if (state.friends.length === 0) {
+    DOM.recentList.innerHTML = emptyState('暂无好友', '点击“添加好友”输入用户名即可添加。', 'li');
+  } else {
+    state.friends.forEach((friend) => {
+      const isOnline = state.onlineUsers.some((user) => user.name === friend.name);
+      DOM.recentList.appendChild(sessionItem({
+        name: friend.name,
+        avatar: friend.avatar,
+        text: isOnline ? '在线，点击发起私聊。' : '离线，仍可查看历史消息。',
+        time: isOnline ? '在线' : '离线',
+        online: isOnline,
+        friend: true,
+        filter: 'friends'
+      }));
+    });
+  }
+
+  applySearchFilter();
 }
 
-async function selectGroup(groupName) {
-  toGroupInput.value = groupName;
-  mode = 'group';
-  modeBtns.forEach(b => b.classList.remove('active'));
-  document.querySelector('[data-mode="group"]').classList.add('active');
-  updateUIForMode();
-  showPanel('chat');
+async function refreshOnline() {
+  const data = await api('/api/online');
+  state.onlineUsers = data.online || [];
+  renderSessionList();
+}
+
+async function refreshFriends() {
+  if (!state.token) return;
+  const data = await api(`/api/friends?token=${encodeURIComponent(state.token)}`);
+  state.friends = data.friends || [];
+  renderSessionList();
+}
+
+async function refreshGroups() {
+  if (!state.token) return;
+  const data = await api(`/api/groups?token=${encodeURIComponent(state.token)}`);
+  state.groups = data.groups || [];
+  DOM.statGroups.textContent = state.groups.length.toLocaleString();
+  renderGroups();
+}
+
+function renderGroups() {
+  DOM.myGroupsList.innerHTML = '';
+  if (state.groups.length === 0) {
+    DOM.myGroupsList.innerHTML = '<li><span>暂无群组</span><small>创建或加入群组后会显示在这里。</small></li>';
+    return;
+  }
+  state.groups.forEach((name) => {
+    const li = document.createElement('li');
+    li.innerHTML = `
+      <span>☷ ${escapeHtml(name)}</span>
+      <div class="row-actions">
+        <button class="secondary-btn" type="button" data-action="enter">进入</button>
+        <button class="secondary-btn danger-text" type="button" data-action="leave">离开</button>
+      </div>
+    `;
+    li.querySelector('[data-action="enter"]').addEventListener('click', () => {
+      DOM.toGroup.value = name;
+      DOM.inviteGroupName.value = name;
+      setMode('group');
+      DOM.groupsDialog.close();
+      loadHistory('group', name).catch((err) => toast(err.message, 'error'));
+    });
+    li.querySelector('[data-action="leave"]').addEventListener('click', () => leaveGroup(name));
+    DOM.myGroupsList.appendChild(li);
+  });
+}
+
+function renderDiscover() {
+  const online = state.onlineUsers.filter((user) => user.name !== state.username);
+  DOM.discoverOnlineCount.textContent = `${online.length} 人在线`;
+  DOM.discoverFriendCount.textContent = `${state.friends.length} 位好友`;
+  DOM.discoverGroupCount.textContent = `${state.groups.length} 个群组`;
+  DOM.discoverOnlineList.innerHTML = '';
+
+  if (online.length === 0) {
+    DOM.discoverOnlineList.innerHTML = '<li><span>暂无其他在线用户</span><small>让另一个账号登录后会显示在这里。</small></li>';
+    return;
+  }
+
+  const friendsByName = new Map(state.friends.map((friend) => [friend.name, friend]));
+  online.forEach((user) => {
+    const li = document.createElement('li');
+    const isFriend = friendsByName.has(user.name);
+    li.innerHTML = `
+      <span class="friend-line">${avatarMarkup(user.avatar)} ${escapeHtml(user.name)}${isFriend ? ' ★' : ''}</span>
+      <div class="row-actions">
+        <button class="secondary-btn" type="button" data-action="profile">资料</button>
+        <button class="secondary-btn" type="button" data-action="chat">私聊</button>
+        ${isFriend ? '' : '<button class="secondary-btn" type="button" data-action="add">加好友</button>'}
+      </div>
+    `;
+    li.querySelector('[data-action="profile"]').addEventListener('click', () => openProfile(user.name));
+    li.querySelector('[data-action="chat"]').addEventListener('click', () => {
+      DOM.discoverDialog.close();
+      selectPeer(user.name, user.avatar);
+    });
+    li.querySelector('[data-action="add"]')?.addEventListener('click', () => addFriend(user.name).catch((err) => toast(err.message, 'error')));
+    DOM.discoverOnlineList.appendChild(li);
+  });
+}
+
+async function openDiscover() {
+  await Promise.allSettled([refreshOnline(), refreshFriends(), refreshGroups()]);
+  renderDiscover();
+  DOM.discoverDialog.showModal();
+}
+
+async function createOrJoinGroup(action) {
+  const groupName = DOM.newGroupName.value.trim();
+  if (!groupName) return toast('请输入群组名', 'error');
+  await api('/api/group', { method: 'POST', body: { token: state.token, action, groupName } });
+  DOM.newGroupName.value = '';
+  await refreshGroups();
+  toast(action === 'create' ? '群组已创建' : '已加入群组');
+}
+
+async function inviteToGroup() {
+  const memberName = DOM.inviteMemberName.value.trim();
+  const groupName = DOM.inviteGroupName.value.trim() || DOM.toGroup.value.trim();
+  if (!memberName || !groupName) return toast('请输入成员用户名和群组名', 'error');
+  await api('/api/group', { method: 'POST', body: { token: state.token, action: 'invite', groupName, memberName } });
+  DOM.inviteMemberName.value = '';
+  toast('已邀请成员加入群组');
 }
 
 async function leaveGroup(groupName) {
-  try {
-    await apiCall('/api/group', {
-      method: 'POST',
-      body: { token: authToken, action: 'leave', groupName }
+  await api('/api/group', { method: 'POST', body: { token: state.token, action: 'leave', groupName } });
+  await refreshGroups();
+  toast('已离开群组');
+}
+
+async function loadHistory(type = state.mode, target = '') {
+  if (!state.token) return;
+  const params = new URLSearchParams({ token: state.token, type, limit: '300' });
+  if (type === 'private') params.set('peer', target || DOM.toUser.value.trim());
+  if (type === 'group') params.set('group', target || DOM.toGroup.value.trim());
+  if ((type === 'private' && !params.get('peer')) || (type === 'group' && !params.get('group'))) {
+    return toast(type === 'private' ? '请先选择私聊对象' : '请先选择群组', 'error');
+  }
+
+  const data = await api(`/api/history?${params.toString()}`);
+  const history = data.history || [];
+  resetMessages('暂无历史消息', '这里会显示真实发送和接收的消息。');
+  if (history.length === 0) return;
+
+  DOM.messageList.querySelector('.empty-state')?.remove();
+  history.reverse().forEach((item) => {
+    const mine = item.from === state.username;
+    const prefix = item.type === 'group' ? `[${item.group}] ${item.from}: ` : item.type === 'private' ? `${item.from}: ` : `${item.from}: `;
+    addMessage({
+      text: `${prefix}${item.content}`,
+      type: mine ? 'outgoing' : 'incoming',
+      avatar: mine ? state.avatar : (item.avatar || state.selectedPeerAvatar || '🐱'),
+      time: nowLabel(item.created_at),
+      sender: item.from
     });
+  });
+}
 
-    addMsg(`已离开群组：${escapeHtml(groupName)}`, 'system');
-    await refreshGroupList();
+async function login() {
+  const username = DOM.username.value.trim();
+  const password = DOM.password.value.trim();
+  if (!username || !password) return toast('请输入用户名和密码', 'error');
+
+  const data = await api('/api/login', { method: 'POST', body: { username, password } });
+  state.token = data.token;
+  state.username = username;
+  state.avatar = data.avatar || '🐱';
+  state.signature = data.signature || '把简单的事情做漂亮 🌸';
+  state.gender = data.gender || '';
+
+  DOM.userNameDisplay.textContent = username;
+  DOM.userStatus.textContent = '在线';
+  DOM.profileUsername.textContent = `@${username}`;
+  DOM.profileSignature.textContent = state.signature || '把简单的事情做漂亮 🌸';
+  DOM.profileSince.textContent = new Date().toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', year: 'numeric' });
+  [DOM.headerAvatarBtn, DOM.chatAvatarBtn, DOM.profileDialogAvatar].forEach((el) => setAvatar(el, state.avatar));
+
+  showApp();
+  openEvents();
+  setMode('public');
+  resetMessages('暂无消息', '公共频道会显示真实聊天内容。');
+  await Promise.allSettled([refreshOnline(), refreshFriends(), refreshGroups(), loadHistory('public')]);
+}
+
+async function register() {
+  const username = DOM.username.value.trim();
+  const password = DOM.password.value.trim();
+  if (!username || !password) return toast('请输入用户名和密码', 'error');
+  if (password.length < 6) return toast('注册密码至少 6 位', 'error');
+  await api('/api/register', {
+    method: 'POST',
+    body: { username, password, avatar: state.uploadedAvatar || '🐱' }
+  });
+  state.uploadedAvatar = '';
+  DOM.loginAvatarPreview.innerHTML = '📷';
+  toast('注册成功，可以登录了');
+}
+
+function openEvents() {
+  state.eventSource?.close();
+  state.eventSource = new EventSource(`/api/events?token=${encodeURIComponent(state.token)}`);
+  state.eventSource.addEventListener('system', (event) => {
+    addMessage({ text: event.data, system: true });
+    refreshOnline().catch(() => {});
+  });
+  state.eventSource.onmessage = (event) => {
+    if (event.data.includes(`[WEB] ${state.username}:`)) return;
+    const parsed = parseIncomingSender(event.data);
+    addMessage({ text: event.data, avatar: state.selectedPeerAvatar || '🐱', sender: parsed || state.selectedPeer });
+  };
+  state.eventSource.onerror = () => {
+    state.eventSource?.close();
+    toast('实时连接已断开，请重新登录', 'error');
+  };
+}
+
+async function sendMessage() {
+  const text = DOM.messageInput.value.trim();
+  if (!text) return;
+  const payload = { token: state.token, name: state.username, message: text, mode: state.mode };
+  if (state.mode === 'private') {
+    payload.to = DOM.toUser.value.trim();
+    if (!payload.to) return toast('请选择私聊对象', 'error');
+  }
+  if (state.mode === 'group') {
+    payload.to = DOM.toGroup.value.trim();
+    if (!payload.to) return toast('请输入群组名', 'error');
+  }
+  await api('/api/send', { method: 'POST', body: payload });
+  DOM.messageInput.value = '';
+  addMessage({ text, type: 'outgoing', avatar: state.avatar, sender: state.username });
+}
+
+function parseIncomingSender(text) {
+  const privateMatch = text.match(/^\[私聊\]\s*([^:：]+)[:：]/);
+  if (privateMatch) return privateMatch[1].trim();
+  const groupMatch = text.match(/^\[群聊[^\]]*\]\s*([^:：]+)[:：]/);
+  if (groupMatch) return groupMatch[1].trim();
+  const webMatch = text.match(/^\[WEB\]\s*([^:：]+)[:：]/);
+  if (webMatch) return webMatch[1].trim();
+  const plainMatch = text.match(/^([^:：\]]+)[:：]/);
+  return plainMatch ? plainMatch[1].trim() : '';
+}
+
+async function logout() {
+  state.eventSource?.close();
+  if (state.token) {
+    try { await api('/api/logout', { method: 'POST', body: { token: state.token } }); } catch (_) {}
+  }
+  Object.assign(state, {
+    token: '',
+    username: '',
+    avatar: '🐱',
+    selectedPeer: '',
+    selectedPeerAvatar: '🐱',
+    groups: [],
+    friends: [],
+    onlineUsers: [],
+    messages: 0
+  });
+  showLogin();
+}
+
+function applySearchFilter(filter = document.querySelector('.tab.active')?.dataset.filter || 'all') {
+  const keyword = DOM.globalSearchInput.value.trim().toLowerCase();
+  document.querySelectorAll('.session-card').forEach((item) => {
+    const matchesKeyword = !keyword || item.dataset.name.includes(keyword);
+    const matchesFilter = filter === 'all' || item.dataset.filter === filter || (filter === 'online' && item.querySelector('.online-dot'));
+    item.style.display = matchesKeyword && matchesFilter ? 'grid' : 'none';
+  });
+}
+
+function bindAvatarInput(input, preview) {
+  input.addEventListener('change', () => {
+    const file = input.files?.[0];
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) return toast('图片不能超过 2MB', 'error');
+    if (!['image/jpeg', 'image/png', 'image/gif', 'image/webp'].includes(file.type)) return toast('仅支持 JPG / PNG / GIF / WebP', 'error');
+    const reader = new FileReader();
+    reader.onload = () => {
+      state.uploadedAvatar = String(reader.result || '');
+      preview.innerHTML = `<img src="${escapeHtml(state.uploadedAvatar)}" alt="预览" />`;
+    };
+    reader.readAsDataURL(file);
+  });
+  preview.addEventListener('click', () => input.click());
+}
+
+async function openProfile(targetUsername = state.username) {
+  if (!state.token) return;
+  try {
+    const target = targetUsername || state.username;
+    const data = await api(`/api/profile?token=${encodeURIComponent(state.token)}&user=${encodeURIComponent(target)}`);
+    const isSelf = data.isSelf !== false;
+    if (isSelf) {
+      state.avatar = data.avatar || state.avatar;
+      state.signature = data.signature || '';
+      state.gender = data.gender || '';
+    }
+    DOM.profileDialog.querySelector('h2').textContent = isSelf ? '个人简介' : '用户简介';
+    DOM.profileNameInput.value = data.username || target;
+    DOM.profileGenderInput.value = data.gender || '';
+    DOM.profileSignatureInput.value = data.signature || '';
+    DOM.profileNameInput.disabled = !isSelf;
+    DOM.profileGenderInput.disabled = !isSelf;
+    DOM.profileSignatureInput.disabled = !isSelf;
+  DOM.settingsAvatarPreview.parentElement.style.display = isSelf ? 'grid' : 'none';
+    DOM.saveAvatarBtn.style.display = isSelf ? '' : 'none';
+    DOM.saveProfileBtn.style.display = isSelf ? '' : 'none';
+    setAvatar(DOM.profileDialogAvatar, data.avatar || '🐱');
+    DOM.profileDialog.showModal();
   } catch (err) {
-    showNotification(`离开群组失败: ${err.message}`, 'error');
+    toast(err.message, 'error');
   }
 }
 
-async function refreshGroupList() {
-  if (!authToken) {
-    return;
-  }
+async function saveProfile() {
+  const nextName = DOM.profileNameInput.value.trim();
+  const gender = DOM.profileGenderInput.value.trim();
+  const signature = DOM.profileSignatureInput.value.trim();
+  if (!nextName) return toast('昵称不能为空', 'error');
 
-  try {
-    const data = await apiCall(`/api/groups?token=${encodeURIComponent(authToken)}`);
-    myGroups = data.groups || [];
-    updateGroupsList();
-  } catch (err) {
-    console.error('刷新群组列表失败:', err);
-    showNotification('刷新群组列表失败', 'error');
+  if (nextName !== state.username) {
+    await api('/api/rename', { method: 'POST', body: { token: state.token, new: nextName } });
+    state.username = nextName;
+    DOM.userNameDisplay.textContent = nextName;
+    DOM.profileUsername.textContent = `@${nextName}`;
   }
+  await api('/api/profile', { method: 'POST', body: { token: state.token, gender, signature } });
+  state.gender = gender;
+  state.signature = signature;
+  DOM.profileSignature.textContent = signature || '把简单的事情做漂亮 🌸';
+  toast('个人简介已保存');
+  DOM.profileDialog.close();
 }
 
-async function loadHistory(type, target) {
-  if (!authToken) {
-    showNotification('请先登录后再加载历史', 'warn');
+async function saveAvatar() {
+  if (!state.uploadedAvatar) return toast('请先选择头像', 'error');
+  await api('/api/avatar', { method: 'POST', body: { token: state.token, avatar: state.uploadedAvatar } });
+  state.avatar = state.uploadedAvatar;
+  state.uploadedAvatar = '';
+  [DOM.headerAvatarBtn, DOM.chatAvatarBtn, DOM.profileDialogAvatar].forEach((el) => setAvatar(el, state.avatar));
+  DOM.settingsAvatarPreview.innerHTML = '📷';
+  toast('头像已保存');
+}
+
+function renderFriendsDialog() {
+  DOM.friendsList.innerHTML = '';
+  if (state.friends.length === 0) {
+    DOM.friendsList.innerHTML = '<li><span>暂无好友</span><small>输入用户名添加好友。</small></li>';
     return;
   }
-
-  let url = `/api/history?token=${encodeURIComponent(authToken)}&type=${encodeURIComponent(type)}`;
-  
-  if (type === 'group') {
-    if (!target) {
-      showNotification('请输入群名以加载群聊历史', 'warn');
-      return;
-    }
-    url += `&group=${encodeURIComponent(target)}`;
-  }
-  
-  if (type === 'private') {
-    if (!target) {
-      showNotification('请输入私聊对象以加载私聊历史', 'warn');
-      return;
-    }
-    url += `&peer=${encodeURIComponent(target)}`;
-  }
-
-  try {
-    const data = await apiCall(url);
-    const history = data.history || [];
-    messageList.innerHTML = '';
-
-    if (history.length === 0) {
-      addMsg('暂无历史消息。', 'system');
-      return;
-    }
-
-    history.reverse().forEach(item => {
-      let text = escapeHtml(item.content);
-      if (item.type === 'group') {
-        text = `[群聊 ${escapeHtml(item.group)}] ${escapeHtml(item.from)}: ${text}`;
-      } else if (item.type === 'private') {
-        text = `[私聊] ${escapeHtml(item.from)} -> ${escapeHtml(item.to)}: ${text}`;
-      } else {
-        text = `${escapeHtml(item.from)}: ${text}`;
-      }
-      addMsg(text, item.type === 'group' ? 'group' : item.type === 'private' ? 'private' : 'incoming');
+  state.friends.forEach((friend) => {
+    const li = document.createElement('li');
+    li.innerHTML = `
+      <span class="friend-line">${avatarMarkup(friend.avatar)} ${escapeHtml(friend.name)}</span>
+      <div class="row-actions">
+        <button class="secondary-btn" type="button" data-action="chat">发消息</button>
+        <button class="secondary-btn danger-text" type="button" data-action="remove">删除</button>
+      </div>
+    `;
+    li.querySelector('[data-action="chat"]').addEventListener('click', () => {
+      DOM.contactsDialog.close();
+      selectPeer(friend.name, friend.avatar);
     });
-  } catch (err) {
-    showNotification(`加载历史失败: ${err.message}`, 'error');
-  }
+    li.querySelector('[data-action="remove"]').addEventListener('click', () => removeFriend(friend.name));
+    DOM.friendsList.appendChild(li);
+  });
 }
 
-loadHistoryBtn.addEventListener('click', () => {
-  const target = mode === 'group' ? toGroupInput.value.trim() : mode === 'private' ? toUserInput.value.trim() : '';
-  loadHistory(mode, target);
-});
+async function loadFriendsDialog() {
+  DOM.friendsList.innerHTML = '<li><span>加载中...</span></li>';
+  DOM.contactsDialog.showModal();
+  await refreshFriends();
+  renderFriendsDialog();
+}
 
-// 退出登录
-logoutBtn.addEventListener('click', async () => {
-  if (eventSource) eventSource.close();
+async function addFriend(friendName = DOM.friendNameInput.value.trim() || state.selectedPeer) {
+  if (!friendName) return toast('请输入好友用户名', 'error');
+  if (friendName === state.username) return toast('不能添加自己为好友', 'error');
+  await api('/api/friend', {
+    method: 'POST',
+    headers: { Authorization: state.token },
+    body: { action: 'add', friend: friendName }
+  });
+  DOM.friendNameInput.value = '';
+  await refreshFriends();
+  renderFriendsDialog();
+  toast('好友已添加');
+}
 
-  if (authToken) {
-    try {
-      await apiCall('/api/logout', {
-        method: 'POST',
-        body: { token: authToken }
-      });
-    } catch (err) {
-      // 忽略登出错误
+async function removeFriend(friendName) {
+  await api('/api/friend', {
+    method: 'POST',
+    headers: { Authorization: state.token },
+    body: { action: 'remove', friend: friendName }
+  });
+  await refreshFriends();
+  renderFriendsDialog();
+  toast('好友已删除');
+}
+
+function bindEvents() {
+  DOM.loginForm.addEventListener('submit', (event) => event.preventDefault());
+  DOM.connectBtn.addEventListener('click', () => login().catch((err) => toast(err.message, 'error')));
+  DOM.registerBtn.addEventListener('click', () => register().catch((err) => toast(err.message, 'error')));
+  DOM.sendBtn.addEventListener('click', () => sendMessage().catch((err) => toast(err.message, 'error')));
+  DOM.messageInput.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && !event.shiftKey) {
+      event.preventDefault();
+      sendMessage().catch((err) => toast(err.message, 'error'));
     }
-  }
+  });
 
-  authToken = '';
-  currentUsername = '';
-  currentPassword = '';
-  currentAvatar = '';
-  uploadedAvatarBase64 = null;
-  myGroups = [];
-  messageList.innerHTML = '';
-  userNameDisplay.textContent = '未登录';
-  userStatus.textContent = '离线';
-  userAvatar.innerHTML = '👤';
-  showPanel('login');
-});
+  document.querySelectorAll('[data-mode]').forEach((btn) => btn.addEventListener('click', () => setMode(btn.dataset.mode)));
+  document.querySelectorAll('[data-mode-jump]').forEach((btn) => btn.addEventListener('click', () => setMode(btn.dataset.modeJump)));
+  document.querySelectorAll('.tab').forEach((btn) => btn.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach((item) => item.classList.remove('active'));
+    btn.classList.add('active');
+    applySearchFilter(btn.dataset.filter);
+  }));
 
-// 设置面板事件
-darkModeToggle.addEventListener('change', () => {
-  const isDarkMode = darkModeToggle.checked;
-  document.body.classList.toggle('dark-mode', isDarkMode);
-  localStorage.setItem('darkMode', isDarkMode);
-  addMsg(isDarkMode ? '已启用深色模式' : '已禁用深色模式', 'system');
-});
+  DOM.globalSearchInput.addEventListener('input', () => applySearchFilter());
+  DOM.toUser.addEventListener('input', updateChatTitle);
+  DOM.toGroup.addEventListener('input', () => {
+    DOM.inviteGroupName.value = DOM.toGroup.value.trim();
+    updateChatTitle();
+  });
+  DOM.loadHistoryBtn.addEventListener('click', () => loadHistory().catch((err) => toast(err.message, 'error')));
+  DOM.logoutBtn.addEventListener('click', () => logout());
+  DOM.refreshOnlineBtn.addEventListener('click', () => Promise.allSettled([refreshOnline(), refreshFriends()]).then(() => toast('在线列表已刷新')));
+  DOM.openAddFriendBtn.addEventListener('click', () => {
+    DOM.contactsDialog.showModal();
+    DOM.friendNameInput.focus();
+  });
+  DOM.newMessageBtn.addEventListener('click', () => {
+    setMode('public');
+    DOM.messageInput.focus();
+    loadHistory('public').catch((err) => toast(err.message, 'error'));
+  });
 
-soundToggle.addEventListener('change', () => {
-  const isSoundEnabled = soundToggle.checked;
-  localStorage.setItem('soundEnabled', isSoundEnabled);
-  addMsg(isSoundEnabled ? '已启用声音提示' : '已禁用声音提示', 'system');
-});
+  $('focusSearchBtn').addEventListener('click', () => DOM.globalSearchInput.focus());
+  $('callBtn').addEventListener('click', () => toast('语音通话入口已响应'));
+  $('videoBtn').addEventListener('click', () => toast('视频通话入口已响应'));
+  $('clearViewBtn').addEventListener('click', () => resetMessages('已清空当前视图', '这只影响前端显示，不会删除服务器历史。'));
+  $('moreBtn').addEventListener('click', () => addFriend().catch((err) => toast(err.message, 'error')));
+  $('quickAddBtn').addEventListener('click', () => {
+    DOM.messageInput.value += state.mode === 'group' ? '@全体成员 ' : '#话题 ';
+    DOM.messageInput.focus();
+  });
+  $('emojiBtn').addEventListener('click', () => {
+    DOM.messageInput.value += ' 😊';
+    DOM.messageInput.focus();
+  });
 
-fontSizeSlider.addEventListener('input', (e) => {
-  const size = parseInt(e.target.value);
-  if (size < 12 || size > 24) {
-    return;
-  }
-  fontSizeValue.textContent = size + 'px';
-  document.body.style.fontSize = size + 'px';
-  localStorage.setItem('fontSize', size);
-});
+  DOM.headerAvatarBtn.addEventListener('click', () => openProfile(state.username));
+  DOM.profileAvatarBtn.addEventListener('click', () => openProfile(state.username));
+  DOM.viewProfileBtn.addEventListener('click', () => openProfile(state.username));
+  DOM.chatAvatarBtn.addEventListener('click', () => {
+    if (state.mode === 'private' && state.selectedPeer) {
+      openProfile(state.selectedPeer);
+    } else {
+      openProfile(state.username);
+    }
+  });
+  DOM.saveProfileBtn.addEventListener('click', () => saveProfile().catch((err) => toast(err.message, 'error')));
+  DOM.saveAvatarBtn.addEventListener('click', () => saveAvatar().catch((err) => toast(err.message, 'error')));
+  DOM.createGroupBtn.addEventListener('click', () => createOrJoinGroup('create').catch((err) => toast(err.message, 'error')));
+  DOM.joinGroupBtn.addEventListener('click', () => createOrJoinGroup('join').catch((err) => toast(err.message, 'error')));
+  DOM.inviteGroupBtn.addEventListener('click', () => inviteToGroup().catch((err) => toast(err.message, 'error')));
+  DOM.addFriendBtn.addEventListener('click', () => addFriend(DOM.friendNameInput.value.trim()).catch((err) => toast(err.message, 'error')));
+  DOM.reloadFriendsBtn.addEventListener('click', () => loadFriendsDialog().catch((err) => toast(err.message, 'error')));
 
-// ==================== 初始化 ====================
+  ['groupsRailBtn', 'groupsTopBtn'].forEach((id) => $(id)?.addEventListener('click', () => refreshGroups().then(() => DOM.groupsDialog.showModal()).catch((err) => toast(err.message, 'error'))));
+  ['contactsRailBtn', 'contactsTopBtn'].forEach((id) => $(id)?.addEventListener('click', () => loadFriendsDialog().catch((err) => toast(err.message, 'error'))));
+  ['settingsTopBtn', 'settingsRailBtn'].forEach((id) => $(id)?.addEventListener('click', () => DOM.settingsDialog.showModal()));
+  $('discoverRailBtn').addEventListener('click', () => openDiscover().catch((err) => toast(err.message, 'error')));
+  $('discoverTopBtn').addEventListener('click', () => openDiscover().catch((err) => toast(err.message, 'error')));
+  DOM.discoverRefreshBtn.addEventListener('click', () => openDiscover().catch((err) => toast(err.message, 'error')));
+  DOM.discoverAddFriendBtn.addEventListener('click', () => {
+    DOM.discoverDialog.close();
+    DOM.contactsDialog.showModal();
+    DOM.friendNameInput.focus();
+  });
+  DOM.discoverPublicBtn.addEventListener('click', () => {
+    DOM.discoverDialog.close();
+    setMode('public');
+    loadHistory('public').catch((err) => toast(err.message, 'error'));
+  });
+  DOM.discoverOnlineBtn.addEventListener('click', () => DOM.globalSearchInput.focus());
+  DOM.discoverFriendsBtn.addEventListener('click', () => {
+    DOM.discoverDialog.close();
+    loadFriendsDialog().catch((err) => toast(err.message, 'error'));
+  });
+  DOM.discoverGroupsBtn.addEventListener('click', () => {
+    DOM.discoverDialog.close();
+    refreshGroups().then(() => DOM.groupsDialog.showModal()).catch((err) => toast(err.message, 'error'));
+  });
+
+  DOM.darkModeToggle.addEventListener('change', () => {
+    document.body.classList.toggle('dark-mode', DOM.darkModeToggle.checked);
+    localStorage.setItem('darkMode', String(DOM.darkModeToggle.checked));
+  });
+  DOM.soundToggle.addEventListener('change', () => localStorage.setItem('soundEnabled', String(DOM.soundToggle.checked)));
+  DOM.fontSizeSlider.addEventListener('input', () => {
+    DOM.fontSizeValue.textContent = `${DOM.fontSizeSlider.value}px`;
+    document.body.style.fontSize = `${DOM.fontSizeSlider.value}px`;
+    localStorage.setItem('fontSize', DOM.fontSizeSlider.value);
+  });
+  document.addEventListener('keydown', (event) => {
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+      event.preventDefault();
+      DOM.globalSearchInput.focus();
+      DOM.globalSearchInput.select();
+    }
+  });
+
+  bindAvatarInput(DOM.loginAvatarUpload, DOM.loginAvatarPreview);
+  bindAvatarInput(DOM.settingsAvatarUpload, DOM.settingsAvatarPreview);
+}
+
 function init() {
-  // 恢复用户偏好设置
-  const darkMode = localStorage.getItem('darkMode') === 'true';
-  const fontSize = parseInt(localStorage.getItem('fontSize') || '14');
-  const soundEnabled = localStorage.getItem('soundEnabled') !== 'false';
-  
-  if (darkMode) {
-    document.body.classList.add('dark-mode');
-    darkModeToggle.checked = true;
-  }
-  
-  if (!soundEnabled) {
-    soundToggle.checked = false;
-  }
-  
-  fontSizeSlider.value = fontSize;
-  fontSizeSlider.min = '12';
-  fontSizeSlider.max = '24';
-  document.body.style.fontSize = fontSize + 'px';
-  fontSizeValue.textContent = fontSize + 'px';
-  
-  // 初始化 UI
-  showPanel('login');
-  updateUIForMode();
-  
-  // 添加欢迎消息
-  console.log('IM 系统初始化完成');
+  DOM.darkModeToggle.checked = localStorage.getItem('darkMode') === 'true';
+  DOM.soundToggle.checked = localStorage.getItem('soundEnabled') !== 'false';
+  DOM.fontSizeSlider.value = localStorage.getItem('fontSize') || '14';
+  DOM.fontSizeValue.textContent = `${DOM.fontSizeSlider.value}px`;
+  document.body.style.fontSize = `${DOM.fontSizeSlider.value}px`;
+  document.body.classList.toggle('dark-mode', DOM.darkModeToggle.checked);
+  setAvatar(DOM.chatAvatarBtn, '🐾');
+  renderSessionList();
+  resetMessages();
+  bindEvents();
 }
-
-// 防止意外提交表单
-document.getElementById('loginForm')?.addEventListener('submit', (e) => {
-  e.preventDefault();
-});
 
 init();
-
