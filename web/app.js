@@ -57,6 +57,11 @@ const DOM = {
   discoverFriendCount: $('discoverFriendCount'),
   discoverGroupCount: $('discoverGroupCount'),
   discoverOnlineList: $('discoverOnlineList'),
+  thoughtComposerAvatar: $('thoughtComposerAvatar'),
+  thoughtInput: $('thoughtInput'),
+  thoughtMood: $('thoughtMood'),
+  publishThoughtBtn: $('publishThoughtBtn'),
+  thoughtFeed: $('thoughtFeed'),
   viewProfileBtn: $('viewProfileBtn'),
   saveProfileBtn: $('saveProfileBtn'),
   saveAvatarBtn: $('saveAvatarBtn'),
@@ -80,7 +85,8 @@ const DOM = {
   fontSizeValue: $('fontSizeValue'),
   statMessages: $('statMessages'),
   statGroups: $('statGroups'),
-  toastHost: $('toastHost')
+  toastHost: $('toastHost'),
+  topicTags: $('topicTags')
 };
 
 const state = {
@@ -95,6 +101,7 @@ const state = {
   groups: [],
   friends: [],
   onlineUsers: [],
+  thoughts: [],
   messages: 0,
   uploadedAvatar: '',
   eventSource: null
@@ -364,6 +371,8 @@ function renderDiscover() {
   DOM.discoverOnlineCount.textContent = `${online.length} 人在线`;
   DOM.discoverFriendCount.textContent = `${state.friends.length} 位好友`;
   DOM.discoverGroupCount.textContent = `${state.groups.length} 个群组`;
+  setAvatar(DOM.thoughtComposerAvatar, state.avatar);
+  renderThoughts();
   DOM.discoverOnlineList.innerHTML = '';
 
   if (online.length === 0) {
@@ -393,10 +402,126 @@ function renderDiscover() {
   });
 }
 
+function thoughtStorageKey() {
+  return 'nekochat:thoughts:v1';
+}
+
+function loadThoughts() {
+  try {
+    const value = localStorage.getItem(thoughtStorageKey());
+    state.thoughts = value ? JSON.parse(value) : [];
+    if (!Array.isArray(state.thoughts)) state.thoughts = [];
+  } catch (_) {
+    state.thoughts = [];
+  }
+}
+
+function saveThoughts() {
+  const compact = state.thoughts.slice(0, 80).map((thought) => ({
+    ...thought,
+    avatar: thought.avatar?.startsWith('data:') ? '' : thought.avatar
+  }));
+  try {
+    localStorage.setItem(thoughtStorageKey(), JSON.stringify(compact));
+  } catch (_) {
+    toast('想法本地缓存空间不足，已保留当前页面内容', 'error');
+  }
+}
+
+function formatThoughtTime(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '刚刚';
+  const delta = Date.now() - date.getTime();
+  if (delta < 60 * 1000) return '刚刚';
+  if (delta < 60 * 60 * 1000) return `${Math.floor(delta / 60000)} 分钟前`;
+  if (delta < 24 * 60 * 60 * 1000) return `${Math.floor(delta / 3600000)} 小时前`;
+  return date.toLocaleDateString('zh-CN', { month: 'short', day: 'numeric' });
+}
+
+function visibleThoughts() {
+  const visibleNames = new Set([state.username, ...state.friends.map((friend) => friend.name)]);
+  return state.thoughts.filter((thought) => visibleNames.has(thought.author));
+}
+
+function renderThoughts() {
+  DOM.thoughtFeed.innerHTML = '';
+  const friendMap = new Map(state.friends.map((friend) => [friend.name, friend]));
+  const items = visibleThoughts();
+  if (items.length === 0) {
+    DOM.thoughtFeed.innerHTML = emptyState('还没有好友动态', '发布一条想法，或者添加好友后查看他们的动态。', 'li');
+    return;
+  }
+
+  items.forEach((thought) => {
+    const friend = friendMap.get(thought.author);
+    const avatar = thought.author === state.username ? state.avatar : (friend?.avatar || thought.avatar || '🐱');
+    const liked = (thought.likedBy || []).includes(state.username);
+    const li = document.createElement('li');
+    li.className = 'thought-card';
+    li.dataset.id = thought.id;
+    const tags = thought.tags && thought.tags.length ? thought.tags : (thought.mood ? [thought.mood] : []);
+    li.innerHTML = `
+      <header class="thought-head">
+        <button class="thought-avatar" type="button" data-action="profile">${avatarMarkup(avatar)}</button>
+        <div>
+          <strong>${escapeHtml(thought.author)}</strong>
+          <span>${escapeHtml(formatThoughtTime(thought.createdAt))}${tags.length ? ` · ${tags.map(t => '#' + t).join(' ')}` : ''}</span>
+        </div>
+      </header>
+      <p class="thought-content">${escapeHtml(thought.content)}</p>
+      <div class="thought-actions">
+        <button class="secondary-btn" type="button" data-action="like">${liked ? '已赞' : '点赞'} ${Number(thought.likes || 0)}</button>
+        ${thought.author === state.username
+          ? '<button class="secondary-btn" type="button" data-action="profile">我的资料</button>'
+          : '<button class="secondary-btn" type="button" data-action="chat">私聊</button>'}
+      </div>
+      <div class="thought-comments">
+        ${(thought.comments || []).map((comment) => `<p><b>${escapeHtml(comment.author)}：</b>${escapeHtml(comment.content)}</p>`).join('')}
+      </div>
+      <div class="thought-comment-box">
+        <input type="text" placeholder="写评论..." data-role="comment-input" />
+        <button class="secondary-btn" type="button" data-action="comment">评论</button>
+      </div>
+    `;
+    DOM.thoughtFeed.appendChild(li);
+  });
+}
+
+function publishThought() {
+  const content = DOM.thoughtInput.value.trim();
+  if (!content) return toast('先写一点想法再发布', 'error');
+  const selectedTags = Array.from(document.querySelectorAll('.topic-tag.active')).map((btn) => btn.dataset.tag);
+  state.thoughts.unshift({
+    id: `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    author: state.username,
+    avatar: state.avatar?.startsWith('data:') ? '' : state.avatar,
+    tags: selectedTags,
+    content,
+    likes: 0,
+    likedBy: [],
+    comments: [],
+    createdAt: new Date().toISOString()
+  });
+  DOM.thoughtInput.value = '';
+  document.querySelectorAll('.topic-tag.active').forEach((btn) => btn.classList.remove('active'));
+  saveThoughts();
+  renderDiscover();
+  toast('想法已发布');
+}
+
+function updateThought(id, updater) {
+  const thought = state.thoughts.find((item) => item.id === id);
+  if (!thought) return;
+  updater(thought);
+  saveThoughts();
+  renderDiscover();
+}
+
 async function openDiscover() {
   await Promise.allSettled([refreshOnline(), refreshFriends(), refreshGroups()]);
+  loadThoughts();
   renderDiscover();
-  DOM.discoverDialog.showModal();
+  if (!DOM.discoverDialog.open) DOM.discoverDialog.showModal();
 }
 
 async function createOrJoinGroup(action) {
@@ -675,8 +800,7 @@ async function addFriend(friendName = DOM.friendNameInput.value.trim() || state.
   if (friendName === state.username) return toast('不能添加自己为好友', 'error');
   await api('/api/friend', {
     method: 'POST',
-    headers: { Authorization: state.token },
-    body: { action: 'add', friend: friendName }
+    body: { token: state.token, action: 'add', friend: friendName }
   });
   DOM.friendNameInput.value = '';
   await refreshFriends();
@@ -687,14 +811,12 @@ async function addFriend(friendName = DOM.friendNameInput.value.trim() || state.
 async function removeFriend(friendName) {
   await api('/api/friend', {
     method: 'POST',
-    headers: { Authorization: state.token },
-    body: { action: 'remove', friend: friendName }
+    body: { token: state.token, action: 'remove', friend: friendName }
   });
   await refreshFriends();
   renderFriendsDialog();
   toast('好友已删除');
 }
-
 function bindEvents() {
   DOM.loginForm.addEventListener('submit', (event) => event.preventDefault());
   DOM.connectBtn.addEventListener('click', () => login().catch((err) => toast(err.message, 'error')));
@@ -728,6 +850,10 @@ function bindEvents() {
     DOM.contactsDialog.showModal();
     DOM.friendNameInput.focus();
   });
+  document.querySelector('.rail-logo')?.addEventListener('click', () => {
+    setMode('public');
+    loadHistory('public').catch((err) => toast(err.message, 'error'));
+  });
   DOM.newMessageBtn.addEventListener('click', () => {
     setMode('public');
     DOM.messageInput.focus();
@@ -739,13 +865,29 @@ function bindEvents() {
   $('videoBtn').addEventListener('click', () => toast('视频通话入口已响应'));
   $('clearViewBtn').addEventListener('click', () => resetMessages('已清空当前视图', '这只影响前端显示，不会删除服务器历史。'));
   $('moreBtn').addEventListener('click', () => addFriend().catch((err) => toast(err.message, 'error')));
-  $('quickAddBtn').addEventListener('click', () => {
-    DOM.messageInput.value += state.mode === 'group' ? '@全体成员 ' : '#话题 ';
-    DOM.messageInput.focus();
+  $('emojiBtn').addEventListener('click', (event) => {
+    event.stopPropagation();
+    const picker = $('emojiPicker');
+    picker.hidden = !picker.hidden;
   });
-  $('emojiBtn').addEventListener('click', () => {
-    DOM.messageInput.value += ' 😊';
-    DOM.messageInput.focus();
+  $('emojiPicker').addEventListener('click', (event) => {
+    const btn = event.target.closest('button');
+    if (!btn) return;
+    const emoji = btn.textContent;
+    const input = DOM.messageInput;
+    const start = input.selectionStart;
+    const end = input.selectionEnd;
+    input.value = input.value.slice(0, start) + emoji + input.value.slice(end);
+    input.selectionStart = input.selectionEnd = start + emoji.length;
+    input.focus();
+    $('emojiPicker').hidden = true;
+  });
+  document.addEventListener('click', (event) => {
+    const picker = $('emojiPicker');
+    const btn = $('emojiBtn');
+    if (!picker.hidden && !picker.contains(event.target) && event.target !== btn && !btn.contains(event.target)) {
+      picker.hidden = true;
+    }
   });
 
   DOM.headerAvatarBtn.addEventListener('click', () => openProfile(state.username));
@@ -772,6 +914,56 @@ function bindEvents() {
   $('discoverRailBtn').addEventListener('click', () => openDiscover().catch((err) => toast(err.message, 'error')));
   $('discoverTopBtn').addEventListener('click', () => openDiscover().catch((err) => toast(err.message, 'error')));
   DOM.discoverRefreshBtn.addEventListener('click', () => openDiscover().catch((err) => toast(err.message, 'error')));
+  DOM.publishThoughtBtn.addEventListener('click', () => publishThought());
+  DOM.topicTags.addEventListener('click', (event) => {
+    const btn = event.target.closest('.topic-tag');
+    if (btn) btn.classList.toggle('active');
+  });
+  DOM.thoughtInput.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+      event.preventDefault();
+      publishThought();
+    }
+  });
+  DOM.thoughtFeed.addEventListener('click', (event) => {
+    const button = event.target.closest('button[data-action]');
+    if (!button) return;
+    const card = button.closest('.thought-card');
+    const thought = state.thoughts.find((item) => item.id === card?.dataset.id);
+    if (!thought) return;
+    const action = button.dataset.action;
+    if (action === 'profile') {
+      openProfile(thought.author);
+      return;
+    }
+    if (action === 'chat') {
+      DOM.discoverDialog.close();
+      const friend = state.friends.find((item) => item.name === thought.author);
+      selectPeer(thought.author, friend?.avatar || thought.avatar);
+      return;
+    }
+    if (action === 'like') {
+      updateThought(thought.id, (item) => {
+        item.likedBy = Array.isArray(item.likedBy) ? item.likedBy : [];
+        if (item.likedBy.includes(state.username)) {
+          item.likedBy = item.likedBy.filter((name) => name !== state.username);
+        } else {
+          item.likedBy.push(state.username);
+        }
+        item.likes = item.likedBy.length;
+      });
+      return;
+    }
+    if (action === 'comment') {
+      const input = card.querySelector('[data-role="comment-input"]');
+      const content = input.value.trim();
+      if (!content) return toast('评论不能为空', 'error');
+      updateThought(thought.id, (item) => {
+        item.comments = Array.isArray(item.comments) ? item.comments : [];
+        item.comments.push({ author: state.username, content, createdAt: new Date().toISOString() });
+      });
+    }
+  });
   DOM.discoverAddFriendBtn.addEventListener('click', () => {
     DOM.discoverDialog.close();
     DOM.contactsDialog.showModal();
@@ -782,7 +974,10 @@ function bindEvents() {
     setMode('public');
     loadHistory('public').catch((err) => toast(err.message, 'error'));
   });
-  DOM.discoverOnlineBtn.addEventListener('click', () => DOM.globalSearchInput.focus());
+  DOM.discoverOnlineBtn.addEventListener('click', () => {
+    DOM.discoverDialog.close();
+    DOM.globalSearchInput.focus();
+  });
   DOM.discoverFriendsBtn.addEventListener('click', () => {
     DOM.discoverDialog.close();
     loadFriendsDialog().catch((err) => toast(err.message, 'error'));
@@ -822,6 +1017,7 @@ function init() {
   document.body.style.fontSize = `${DOM.fontSizeSlider.value}px`;
   document.body.classList.toggle('dark-mode', DOM.darkModeToggle.checked);
   setAvatar(DOM.chatAvatarBtn, '🐾');
+  loadThoughts();
   renderSessionList();
   resetMessages();
   bindEvents();

@@ -18,26 +18,26 @@ type Client struct {
 
 func NewClient(serverip string, serverport int) *Client {
 	//创建用户端对象
-	client := &Client{
+	c := &Client{
 		Serverip:   serverip,
 		ServerPort: serverport,
 		flag:       99,
 	}
 
 	//链接server
-	conn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", serverip, serverport))
+	conn, err := net.Dial("tcp", net.JoinHostPort(serverip, fmt.Sprintf("%d", serverport)))
 	if err != nil {
 		fmt.Println("net.Dial error", err)
 		return nil
 	}
 
-	client.conn = conn
+	c.conn = conn
 
 	//返回对象
-	return client
+	return c
 }
 
-func (client *Client) menu() bool {
+func (c *Client) menu() bool {
 	var flag int
 
 	fmt.Println("1.公聊模式")
@@ -47,7 +47,7 @@ func (client *Client) menu() bool {
 
 	fmt.Scanln(&flag)
 	if flag >= 0 && flag <= 3 {
-		client.flag = flag
+		c.flag = flag
 		return true
 	} else {
 		fmt.Println(">>>>>请输入合法范围内的数字<<<<<")
@@ -55,7 +55,7 @@ func (client *Client) menu() bool {
 	}
 }
 
-func (client *Client) PublicChat() {
+func (c *Client) PublicChat() {
 	//提示用户输入消息
 	var chatMsg string
 	fmt.Println(">>>>>输入聊天内容, exit退出.")
@@ -67,7 +67,7 @@ func (client *Client) PublicChat() {
 		//消息不为空则发送
 		if len(chatMsg) != 0 {
 			sendMsg := chatMsg + "\n"
-			_, err := client.conn.Write([]byte(sendMsg))
+			_, err := c.conn.Write([]byte(sendMsg))
 			if err != nil {
 				fmt.Println("conn Write err :", err)
 				break
@@ -82,9 +82,9 @@ func (client *Client) PublicChat() {
 }
 
 // 查询在线用户
-func (client *Client) SearchUsers() {
+func (c *Client) SearchUsers() {
 	sendMsg := "who\n"
-	_, err := client.conn.Write([]byte(sendMsg))
+	_, err := c.conn.Write([]byte(sendMsg))
 	if err != nil {
 		fmt.Println("conn Write err:", err)
 		return
@@ -92,11 +92,11 @@ func (client *Client) SearchUsers() {
 }
 
 // 私聊模式
-func (client *Client) Privatechat() {
+func (c *Client) Privatechat() {
 	var RemoteName string
 	var ChatMsg string
 
-	client.SearchUsers()
+	c.SearchUsers()
 	fmt.Println(">>>>>请输入聊天对象[用户名], exit退出.")
 	fmt.Scanln(&RemoteName)
 
@@ -109,7 +109,7 @@ func (client *Client) Privatechat() {
 			if len(ChatMsg) != 0 {
 
 				sendMsg := "to|" + RemoteName + "|" + ChatMsg + "\n"
-				_, err := client.conn.Write([]byte(sendMsg))
+				_, err := c.conn.Write([]byte(sendMsg))
 				if err != nil {
 					fmt.Println("conn Write err:", err)
 					break
@@ -121,20 +121,20 @@ func (client *Client) Privatechat() {
 			fmt.Scanln(&ChatMsg)
 		}
 
-		client.SearchUsers()
+		c.SearchUsers()
 		fmt.Println(">>>>>请输入聊天对象[用户名], exit退出.")
 		fmt.Scanln(&RemoteName)
 
 	}
 }
 
-func (client *Client) UpdateName() bool {
+func (c *Client) UpdateName() bool {
 
 	fmt.Println(">>>>>请输入用户名:")
-	fmt.Scanln(&client.Name)
+	fmt.Scanln(&c.Name)
 
-	sendMsg := "rename|" + client.Name + "\n"
-	_, err := client.conn.Write([]byte(sendMsg))
+	sendMsg := "rename|" + c.Name + "\n"
+	_, err := c.conn.Write([]byte(sendMsg))
 	if err != nil {
 		fmt.Println("conn.Write err:", err)
 		return false
@@ -143,27 +143,27 @@ func (client *Client) UpdateName() bool {
 }
 
 // 处理server回应的消息，直接显示到标准输出即可
-func (client *Client) DealResponse() {
-	//一旦client.conn 有数据，就直接copy到stdout标准输出上，永久阻塞监听
-	io.Copy(os.Stdout, client.conn)
+func (c *Client) DealResponse() {
+	//一旦c.conn 有数据，就直接copy到stdout标准输出上，永久阻塞监听
+	io.Copy(os.Stdout, c.conn)
 }
-func (client *Client) Run() {
-	for client.flag != 0 {
-		for client.menu() != true {
+func (c *Client) Run() {
+	for c.flag != 0 {
+		for c.menu() != true {
 
 		}
 
 		//根据不同模式处理不同的业务
-		switch client.flag {
+		switch c.flag {
 		case 1:
 			//公聊模式
-			client.PublicChat()
+			c.PublicChat()
 		case 2:
 			//私聊模式
-			client.Privatechat()
+			c.Privatechat()
 		case 3:
 			//更新用户名
-			client.UpdateName()
+			c.UpdateName()
 			//go的switch默认break
 		}
 	}
@@ -182,17 +182,17 @@ func main() {
 	//命令行解析
 	flag.Parse()
 
-	client := NewClient(serverIp, serverPort)
-	if client == nil {
+	c := NewClient(serverIp, serverPort)
+	if c == nil {
 		fmt.Println(">>>>>连接服务器失败...")
 		return
 	}
 
 	//单独开启一个goroutine处理server的回执消息
-	go client.DealResponse()
+	go c.DealResponse()
 
 	fmt.Println(">>>>>连接服务器成功...")
 
 	//启动客户端业务
-	client.Run()
+	c.Run()
 }

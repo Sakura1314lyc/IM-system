@@ -38,77 +38,77 @@ func NewUser(conn net.Conn, server *Server) *User {
 }
 
 // 用户上线的业务
-func (this *User) Online() {
-	this.Server.mapLock.Lock()
+func (u *User) Online() {
+	u.Server.mapLock.Lock()
 	// 清理旧的重复映射（例如先用地址上线，然后登录时会改名）
-	for key, user := range this.Server.OnlineMap {
-		if user == this && key != this.Name {
-			delete(this.Server.OnlineMap, key)
+	for key, user := range u.Server.OnlineMap {
+		if user == u && key != u.Name {
+			delete(u.Server.OnlineMap, key)
 		}
 	}
 
-	this.Server.OnlineMap[this.Name] = this
-	this.Server.mapLock.Unlock()
+	u.Server.OnlineMap[u.Name] = u
+	u.Server.mapLock.Unlock()
 
-	fmt.Printf("[%s] 用户 %s(%s) 上线\n", time.Now().Format("2006-01-02 15:04:05"), this.Name, this.Addr)
+	fmt.Printf("[%s] 用户 %s(%s) 上线\n", time.Now().Format("2006-01-02 15:04:05"), u.Name, u.Addr)
 
 	//广播当前用户上线消息
-	this.Server.BroadCast(this, "已上线")
+	u.Server.BroadCast(u, "已上线")
 }
 
 // 给当前user对应的客户端发送消息
-func (this *User) SendMsg(msg string) {
-	if this.conn == nil {
+func (u *User) SendMsg(msg string) {
+	if u.conn == nil {
 		return
 	}
-	_, err := this.conn.Write([]byte(msg))
+	_, err := u.conn.Write([]byte(msg))
 	if err != nil {
 		fmt.Printf("SendMsg error: %v\n", err)
-		this.Offline()
+		u.Offline()
 	}
 }
 
 // 用户处理消息的业务
-func (this *User) DoMessage(msg string) {
-	if !this.IsAuthenticated {
+func (u *User) DoMessage(msg string) {
+	if !u.IsAuthenticated {
 		if strings.HasPrefix(msg, "login|") {
 			parts := strings.Split(msg, "|")
 			if len(parts) != 3 {
-				this.SendMsg("登录格式错误,示例:login|username|password\n")
+				u.SendMsg("登录格式错误,示例:login|username|password\n")
 				return
 			}
 			username := strings.TrimSpace(parts[1])
 			password := strings.TrimSpace(parts[2])
-			if avatar, ok := this.Server.Authenticate(username, password); ok {
-				if this.Name != username {
-					if !this.Server.RenameUser(this.Name, username) {
-						this.SendMsg("登录失败：用户名已被占用\n")
+			if avatar, ok := u.Server.Authenticate(username, password); ok {
+				if u.Name != username {
+					if !u.Server.RenameUser(u.Name, username) {
+						u.SendMsg("登录失败：用户名已被占用\n")
 						return
 					}
-					this.Name = username
+					u.Name = username
 				}
-				this.Avatar = avatar
-				this.IsAuthenticated = true
-				this.Online()
-				this.SendMsg("登录成功\n")
+				u.Avatar = avatar
+				u.IsAuthenticated = true
+				u.Online()
+				u.SendMsg("登录成功\n")
 			} else {
-				this.SendMsg("用户名或密码错误\n")
+				u.SendMsg("用户名或密码错误\n")
 			}
 		} else if strings.HasPrefix(msg, "register|") {
 			parts := strings.Split(msg, "|")
 			if len(parts) != 3 {
-				this.SendMsg("注册格式错误,示例:register|username|password\n")
+				u.SendMsg("注册格式错误,示例:register|username|password\n")
 				return
 			}
 			username := strings.TrimSpace(parts[1])
 			password := strings.TrimSpace(parts[2])
-			if err := this.Server.Register(username, password, "👤"); err != nil {
-				this.SendMsg("注册失败: " + err.Error() + "\n")
+			if err := u.Server.Register(username, password, "👤"); err != nil {
+				u.SendMsg("注册失败: " + err.Error() + "\n")
 			} else {
-				this.SendMsg("注册成功，请使用 login|username|password 登录\n")
+				u.SendMsg("注册成功，请使用 login|username|password 登录\n")
 			}
 		} else {
-			this.SendMsg("请先登录或注册,格式:login|username|password 或 register|username|password\n")
+			u.SendMsg("请先登录或注册,格式:login|username|password 或 register|username|password\n")
 		}
 		return
 	}
@@ -118,15 +118,15 @@ func (this *User) DoMessage(msg string) {
 
 	if lower == "who" {
 		// 查询当前有哪些在线用户（不包含自己）
-		this.Server.mapLock.RLock()
-		for _, user := range this.Server.OnlineMap {
-			if user.Name == this.Name {
+		u.Server.mapLock.RLock()
+		for _, user := range u.Server.OnlineMap {
+			if user.Name == u.Name {
 				continue
 			}
 			onlineMsg := "[" + user.Addr + "]" + user.Name + ":" + "在线...\n"
-			this.SendMsg(onlineMsg)
+			u.SendMsg(onlineMsg)
 		}
-		this.Server.mapLock.RUnlock()
+		u.Server.mapLock.RUnlock()
 		return
 	}
 
@@ -134,19 +134,19 @@ func (this *User) DoMessage(msg string) {
 	if strings.HasPrefix(lower, "rename|") {
 		parts := strings.SplitN(msg, "|", 2)
 		if len(parts) != 2 || strings.TrimSpace(parts[1]) == "" {
-			this.SendMsg("rename 命令格式错误,示例:rename|newname\n")
+			u.SendMsg("rename 命令格式错误,示例:rename|newname\n")
 			return
 		}
 
 		newName := strings.TrimSpace(parts[1])
 		// 修复并发问题：检查和修改需要原子化
-		if this.Server.RenameUser(this.Name, newName) {
-			this.mu.Lock()
-			this.Name = newName
-			this.mu.Unlock()
-			this.SendMsg("您已成功更新用户名:" + newName + "\n")
+		if u.Server.RenameUser(u.Name, newName) {
+			u.mu.Lock()
+			u.Name = newName
+			u.mu.Unlock()
+			u.SendMsg("您已成功更新用户名:" + newName + "\n")
 		} else {
-			this.SendMsg("当前用户名已被使用\n")
+			u.SendMsg("当前用户名已被使用\n")
 		}
 		return
 	}
@@ -155,19 +155,19 @@ func (this *User) DoMessage(msg string) {
 	if strings.HasPrefix(lower, "to|") {
 		parts := strings.SplitN(msg, "|", 3)
 		if len(parts) != 3 || strings.TrimSpace(parts[1]) == "" || strings.TrimSpace(parts[2]) == "" {
-			this.SendMsg("私聊命令格式错误,示例:to|username|hello\n")
+			u.SendMsg("私聊命令格式错误,示例:to|username|hello\n")
 			return
 		}
 
 		targetName := strings.TrimSpace(parts[1])
 		content := strings.TrimSpace(parts[2])
 
-		if err := this.Server.SendPrivate(this.Name, targetName, content, this.Avatar); err != nil {
-			this.SendMsg(err.Error() + "\n")
+		if err := u.Server.SendPrivate(u.Name, targetName, content, u.Avatar); err != nil {
+			u.SendMsg(err.Error() + "\n")
 			return
 		}
 
-		this.SendMsg("[已发送] " + content + "\n")
+		u.SendMsg("[已发送] " + content + "\n")
 		return
 	}
 
@@ -175,82 +175,82 @@ func (this *User) DoMessage(msg string) {
 	if strings.HasPrefix(lower, "group|") {
 		parts := strings.SplitN(msg, "|", 4)
 		if len(parts) < 2 {
-			this.SendMsg("群聊命令格式错误,示例:group|create|群名 或 group|join|群名 或 group|leave|群名 或 group|send|群名|消息\n")
+			u.SendMsg("群聊命令格式错误,示例:group|create|群名 或 group|join|群名 或 group|leave|群名 或 group|send|群名|消息\n")
 			return
 		}
 		cmd := strings.TrimSpace(parts[1])
 		switch cmd {
 		case "create":
 			if len(parts) != 3 {
-				this.SendMsg("创建群格式:group|create|群名\n")
+				u.SendMsg("创建群格式:group|create|群名\n")
 				return
 			}
 			groupName := strings.TrimSpace(parts[2])
-			if err := this.Server.CreateGroup(groupName, this.Name); err != nil {
-				this.SendMsg(err.Error() + "\n")
+			if err := u.Server.CreateGroup(groupName, u.Name); err != nil {
+				u.SendMsg(err.Error() + "\n")
 				return
 			}
-			this.SendMsg("群组 " + groupName + " 创建成功\n")
+			u.SendMsg("群组 " + groupName + " 创建成功\n")
 		case "join":
 			if len(parts) != 3 {
-				this.SendMsg("加入群格式:group|join|群名\n")
+				u.SendMsg("加入群格式:group|join|群名\n")
 				return
 			}
 			groupName := strings.TrimSpace(parts[2])
-			if err := this.Server.JoinGroup(groupName, this.Name); err != nil {
-				this.SendMsg(err.Error() + "\n")
+			if err := u.Server.JoinGroup(groupName, u.Name); err != nil {
+				u.SendMsg(err.Error() + "\n")
 				return
 			}
-			this.SendMsg("已加入群组 " + groupName + "\n")
+			u.SendMsg("已加入群组 " + groupName + "\n")
 		case "leave":
 			if len(parts) != 3 {
-				this.SendMsg("离开群格式:group|leave|群名\n")
+				u.SendMsg("离开群格式:group|leave|群名\n")
 				return
 			}
 			groupName := strings.TrimSpace(parts[2])
-			if err := this.Server.LeaveGroup(groupName, this.Name); err != nil {
-				this.SendMsg(err.Error() + "\n")
+			if err := u.Server.LeaveGroup(groupName, u.Name); err != nil {
+				u.SendMsg(err.Error() + "\n")
 				return
 			}
-			this.SendMsg("已离开群组 " + groupName + "\n")
+			u.SendMsg("已离开群组 " + groupName + "\n")
 		case "send":
 			if len(parts) != 4 {
-				this.SendMsg("群聊发送格式:group|send|群名|消息\n")
+				u.SendMsg("群聊发送格式:group|send|群名|消息\n")
 				return
 			}
 			groupName := strings.TrimSpace(parts[2])
 			content := strings.TrimSpace(parts[3])
-			if err := this.Server.BroadCastToGroup(groupName, this.Name, content, this.Avatar); err != nil {
-				this.SendMsg(err.Error() + "\n")
+			if err := u.Server.BroadCastToGroup(groupName, u.Name, content, u.Avatar); err != nil {
+				u.SendMsg(err.Error() + "\n")
 				return
 			}
 		default:
-			this.SendMsg("未知群聊命令\n")
+			u.SendMsg("未知群聊命令\n")
 		}
 		return
 	}
 
-	this.Server.BroadCast(this, msg)
+	u.Server.BroadCast(u, msg)
 }
 
 // 用户下线的业务
-func (this *User) Offline() {
-	this.Server.mapLock.Lock()
-	for key, user := range this.Server.OnlineMap {
-		if user == this {
-			delete(this.Server.OnlineMap, key)
+func (u *User) Offline() {
+	u.Server.mapLock.Lock()
+	for key, user := range u.Server.OnlineMap {
+		if user == u {
+			delete(u.Server.OnlineMap, key)
 		}
 	}
-	this.Server.mapLock.Unlock()
+	u.Server.mapLock.Unlock()
 
 	// 广播当前用户下线消息
-	this.Server.BroadCast(this, "已下线")
+	u.Server.BroadCast(u, "已下线")
 
-	if this.conn != nil {
-		this.conn.Close()
+	if u.conn != nil {
+		u.conn.Close()
 	}
 
-	fmt.Printf("[%s] 用户 %s 离线\n", time.Now().Format("2006-01-02 15:04:05"), this.Name)
+	fmt.Printf("[%s] 用户 %s 离线\n", time.Now().Format("2006-01-02 15:04:05"), u.Name)
 
 	// 安全关闭 channel - 避免在已关闭的 channel 上发送导致 panic
 	defer func() {
@@ -261,25 +261,25 @@ func (this *User) Offline() {
 
 	// 清空缓冲区
 	select {
-	case <-this.C:
+	case <-u.C:
 	default:
 	}
-	close(this.C)
+	close(u.C)
 }
 
 // 监听当前User channel的方法，一旦有消息，就直接发送给对端客户端
-func (this *User) ListenMessage() {
+func (u *User) ListenMessage() {
 	defer func() {
 		if r := recover(); r != nil {
 			fmt.Printf("ListenMessage panic: %v\n", r)
 		}
 	}()
 
-	for msg := range this.C {
-		if this.conn == nil {
+	for msg := range u.C {
+		if u.conn == nil {
 			return
 		}
-		_, err := this.conn.Write([]byte(msg + "\n"))
+		_, err := u.conn.Write([]byte(msg + "\n"))
 		if err != nil {
 			fmt.Printf("ListenMessage Write error: %v\n", err)
 			return

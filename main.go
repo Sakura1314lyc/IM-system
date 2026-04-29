@@ -3,6 +3,9 @@ package main
 import (
 	"flag"
 	"fmt"
+	"os"
+	"os/signal"
+	"syscall"
 )
 
 var (
@@ -33,5 +36,11 @@ func main() {
 	go server.StartWeb(webAddr)
 
 	fmt.Printf("启动中:TCP %s:%d,Web %s, DB: %s, TLS: %v\n", serverIP, serverPort, webAddr, dbPath, enableTLS)
-	select {}
+
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	<-sigCh
+	fmt.Println("\n正在关闭服务器...")
+	server.Shutdown()
+	fmt.Println("服务器已关闭")
 }

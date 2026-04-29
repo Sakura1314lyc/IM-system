@@ -1,65 +1,56 @@
 # IM-system
 
-一个基于 Go（TCP）的轻量级即时通信系统示例，包含服务端与命令行客户端。
+一个基于 Go 的轻量级即时通讯系统，支持 **TCP 命令行客户端** 和 **Web UI** 双端接入，后端集成 SQLite 持久化、REST API、SSE 实时推送。
 
-> 适合用于学习：并发连接处理、在线用户管理、广播/私聊消息分发、简单命令协议设计。
+## 项目结构
 
-## 项目概览
-
-本项目当前由多个核心模块组成：
-
-- `main.go`：服务端启动入口（含 TCP IM 服务与 Web REST/SSE 服务）。
-- `server.go`：服务端核心逻辑（监听连接、转发广播、超时踢出、Web API）。
-- `user.go`：用户模型与命令处理（`who` / `rename|` / `to|` / `group|`）。
-- `db.go`：数据库操作（SQLite用户管理、消息持久化）。
-- `types.go`：类型定义。
-- `cmd/client/main.go`：命令行客户端（公聊、私聊、改名）。
-- `web/`：前端 UI 原型，包含 `index.html`、`styles.css`、`app.js`。
+```
+├── main.go              # 启动入口（TCP + Web 双服务 + 优雅关闭）
+├── server.go            # 服务端核心（网络层、业务逻辑、REST API、中间件、TLS）
+├── user.go              # 用户模型与 TCP 命令处理
+├── db.go                # SQLite 数据库层（用户、群组、消息、好友）
+├── cmd/
+│   ├── client/main.go   # TCP 命令行客户端
+│   └── web/main.go      # Web 网关代理（可选独立部署）
+└── web/                 # 前端 UI
+    ├── index.html
+    ├── styles.css
+    └── app.js
+```
 
 ## 功能清单
 
-- ✅ TCP 长连接聊天（支持TLS加密）。
-- ✅ 在线用户上线/下线广播。
-- ✅ 公聊（广播到所有在线用户）。
-- ✅ 私聊（`to|用户名|消息`）。
-- ✅ 查询在线用户（`who`）。
-- ✅ 修改用户名（`rename|新用户名`）。
-- ✅ 服务端空闲超时踢出（10 分钟无消息）。
-- ✅ 基于 `goroutine + channel` 的并发消息处理。
-- ✅ 用户认证（用户名/密码登录，支持注册、Web登录令牌）。
-- ✅ 自定义头像上传（支持 JPG/PNG/GIF 图片，自动转换为 base64 存储）。
-- ✅ 输入验证与安全过滤。
-- ✅ 群聊功能（创建、加入、离开群，群消息广播）。
-- ✅ Web UI 支持公聊、私聊、群聊模式，并可加载历史消息。
-- ✅ Web UI 支持好友管理、在线发现、别人资料查看、长对话滚动和头像上传。
-- ✅ SQLite数据库持久化（用户、群组、消息历史）。
-- ✅ 密码安全哈希（bcrypt）。
+- ✅ TCP 长连接 + Web UI 双端接入，用户互通
+- ✅ 用户注册/登录，密码 bcrypt 哈希存储
+- ✅ 公聊广播、私聊（`to|用户名|消息`）、群聊（创建/加入/离开/发送）
+- ✅ 好友系统（双向关系，事务保证）
+- ✅ 在线用户查询、改名
+- ✅ 消息历史持久化（SQLite，支持按类型/私聊/群聊查询）
+- ✅ Web UI 基于 SSE 实时推送，支持头像、个人资料
+- ✅ 认证中间件（减少 handler 重复代码）
+- ✅ 服务端空闲超时踢出（10 分钟无消息）
+- ✅ 输入安全过滤（防 XSS）
+- ✅ 可选 TLS 加密（自动生成 ECDSA 自签名证书）
+- ✅ 端口被占用时自动回退
+- ✅ 优雅关闭（SIGINT/SIGTERM 信号处理）
+- ✅ IPv6 兼容
 
 ## 环境要求
 
-- Go 1.20+（建议）
-- Linux / macOS / Windows（可运行 Go 即可）
+- Go 1.20+
+- 运行于 Linux / macOS / Windows
 
 ## 快速开始
 
-### 1）启动服务端
-
-在项目根目录执行：
+### 启动服务端
 
 ```bash
 go run .
 ```
 
-或者（显式传入文件，避免漏掉 `server.go`/`user.go`/`db.go`）：
-
-```bash
-go run main.go server.go user.go db.go types.go
-```
-
-默认服务地址：
-
-- TCP IM 服务：`127.0.0.1:8888`（老版命令行客户端互通）。
-- Web UI 服务：`:8080`（浏览器访问 `http://127.0.0.1:8080/`）。
+默认地址：
+- TCP IM 服务：`127.0.0.1:8888`
+- Web UI 服务：`http://127.0.0.1:8080/`
 
 支持参数：
 
@@ -67,196 +58,70 @@ go run main.go server.go user.go db.go types.go
 go run . -ip 127.0.0.1 -port 8888 -web :8080 -db im.db -tls
 ```
 
-> 说明：`main.go` 同时启动了 TCP 服务与 Web 服务，`server.go`、`user.go`、`db.go` 提供了核心 IM 逻辑。
+> `-tls` 会自动生成 ECDSA P256 自签名证书用于开发环境，生产环境请使用正规证书。
 
----
-
----
-
-### 2）启动客户端
-
-新开一个终端窗口：
+### 启动 TCP 客户端
 
 ```bash
 go run ./cmd/client/main.go -ip 127.0.0.1 -port 8888
 ```
 
-可再开多个终端重复执行上面命令，模拟多个用户在线。
-
-## 客户端使用说明
-
-### TCP 客户端
-
-连接成功后先注册或登录：`register|用户名|密码` 或 `login|用户名|密码`（默认用户：alice/bob/charlie，密码：123）
-
-然后显示菜单：
-
-- `1` 公聊模式
-- `2` 私聊模式
-- `3` 更新用户名
-- `0` 退出
-
-### Web 客户端
-
-浏览器访问 `http://127.0.0.1:8080/`，注册新用户或输入用户名和密码连接。
-
-支持三种模式：
-- 公聊：广播给所有用户
-- 私聊：指定用户名发送
-- 群聊：指定群名发送
-
-### 常用协议命令
-
-客户端内部会自动组装命令；如果你用 `nc/telnet` 手动测试，可直接发送：
-
-- 注册：
+连接后先登录或注册：
 
 ```text
-register|newuser|password123
+login|alice|123456
 ```
 
-- 登录：
+默认用户：`alice` / `bob` / `charlie`，密码均为 `123456`。
 
-```text
-login|alice|123
-```
+### 访问 Web UI
 
-- 查询在线用户：
+浏览器打开 `http://127.0.0.1:8080/`，注册新用户或使用默认用户登录。
 
-```text
-who
-```
+## 客户端使用
 
-- 修改用户名：
+### TCP 命令
 
-```text
-rename|alice
-```
+| 命令 | 格式 | 说明 |
+|------|------|------|
+| 注册 | `register\|用户名\|密码` | 密码至少 6 位 |
+| 登录 | `login\|用户名\|密码` | |
+| 在线用户 | `who` | 列出其他在线用户 |
+| 改名 | `rename\|新用户名` | |
+| 私聊 | `to\|用户名\|消息` | |
+| 创建群 | `group\|create\|群名` | |
+| 加入群 | `group\|join\|群名` | |
+| 发群消息 | `group\|send\|群名\|消息` | |
 
-- 私聊：
+### Web API
 
-```text
-to|bob|hello
-```
+所有 GET 请求通过 `?token=` 鉴权，POST 请求通过请求体 `token` 字段鉴权。
 
-- 群聊：
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/api/login` | 登录获取 token |
+| POST | `/api/register` | 注册新用户 |
+| GET | `/api/events?token=` | SSE 实时消息流 |
+| GET | `/api/online` | 在线用户（无需认证） |
+| POST | `/api/send` | 发送消息（公聊/私聊/群聊） |
+| GET | `/api/history?token=&type=&peer=&group=` | 历史消息 |
+| GET | `/api/groups?token=` | 我的群组列表 |
+| POST | `/api/group` | 群组操作（create/join/leave/invite/kick） |
+| GET | `/api/friends?token=` | 好友列表 |
+| POST | `/api/friend` | 添加/删除好友 |
+| GET | `/api/profile?token=&user=` | 查看个人资料 |
+| POST | `/api/profile` | 更新个人资料 |
+| POST | `/api/avatar` | 更新头像 |
+| POST | `/api/rename` | 修改昵称 |
 
-```text
-group|create|mygroup
-group|join|mygroup
-group|send|mygroup|hello everyone
-```
+## 架构要点
 
-## 运行示例（建议验证流程）
-
-1. 启动服务端。
-2. 打开浏览器访问 `http://127.0.0.1:8080/`。
-3. 注册新用户或使用默认用户登录（默认用户：alice/bob/charlie，密码：123）。
-4. 在 Web UI 中选择公聊、私聊或群聊模式。
-5. 使用“加载历史”按钮回溯公聊、私聊或群聊消息历史。
-6. 点击自己头像可编辑个人简介和头像；点击对方头像可查看对方简介。
-7. 在联系人面板添加/删除好友，或从在线列表、发现面板直接发起私聊。
-8. 创建群组、加入群组、邀请成员，并通过群聊发送消息。
-9. 在命令行客户端中也可登录到同一服务，与 Web 用户互通。
-
-## 并发与实现说明
-
-- 服务端通过 `OnlineMap` 维护在线用户，并使用 `RWMutex` 保护并发读写。
-- 广播通过 `Server.Message` channel 分发。
-- 用户数据、群组信息、消息历史通过SQLite数据库持久化存储。
-- 密码使用bcrypt算法安全哈希存储。
-- 支持TLS加密传输（可选，需要证书文件）。
-
-## 数据库结构
-
-项目使用SQLite数据库存储以下信息：
-
-- `users`：用户信息（用户名、密码哈希、头像、注册时间）
-- `groups`：群组信息（群名、创建者、描述、创建时间）
-- `group_members`：群组成员关系
-- `messages`：消息历史（发送者、接收者/群组、内容、类型、时间）
-
-## 安全特性
-
-- 密码bcrypt哈希存储
-- 输入内容过滤（防止XSS）
-- 可选TLS加密传输
-- 用户名长度和密码复杂度验证
-- 每个用户有独立消息 channel（`User.C`）与写回协程。
-- 为避免慢客户端阻塞，广播发送使用了非阻塞写（`select + default`）。
-
-## 已知限制 / 后续优化建议
-
-当前仓库定位为学习示例，可按需扩展：
-
-- [ ] 增加消息持久化（MySQL / Redis / Kafka 等）。
-- [ ] 增加更完整的单元测试与集成测试覆盖。
-- [ ] 支持更多前端主题和动画特效。
-- [ ] 提升协议鲁棒性（粘包拆包、统一序列化格式，如 JSON/Protobuf）。
-- [ ] 完善单元测试与集成测试。
-
-
-## Web UI 已接入后端（支持前后端实时连通）
-
-新的 `main.go` 已集成 Web API + SSE，前端可直接与后端交互：
-
-- `GET /api/events?token=<token>`：SSE 实时接收消息
-- `GET /api/online`：获取当前在线用户列表
-- `POST /api/send`：发送消息（支持公聊/私聊/群聊）
-- `POST /api/rename`：修改昵称
-- `POST /api/avatar`：更新当前用户头像
-- `GET /api/profile?token=<token>&user=<username>`：读取当前用户或指定用户简介
-- `GET /api/groups?token=<token>`：获取当前用户群组列表
-- `POST /api/group`：创建/加入/离开/邀请群组成员
-- `GET /api/friends?token=<token>`：获取好友列表
-- `POST /api/friend`：添加或删除好友（通过 `Authorization` 请求头传入 token）
-- `GET /api/history?token=<token>&type=<public|private|group>&peer=<user>&group=<group>&limit=<n>`：加载聊天历史，默认最多 300 条，最大 500 条
-
-静态页面已被放在 `web/` 目录：
-
-- `web/index.html`：页面结构
-- `web/styles.css`：界面风格增强
-- `web/app.js`：真实 API 调用 + SSE 消息流 + 好友/群组/发现/资料交互
-
-### 访问步骤
-
-1. 运行服务：`go run main.go server.go user.go`
-2. 打开浏览器：`http://127.0.0.1:8080/`
-3. 在 Web 登录页面输入用户名、密码，并选择头像。
-4. 登录后即可切换公聊/私聊/群聊，并使用“加载历史”按钮查看历史记录。
-5. 发现面板可查看在线用户、好友数、群组数，并能快捷私聊或添加好友。
-6. 中间聊天区为内部滚动区域，可承载较长历史对话，不会撑开整体布局。
-
-> 注：TCP CLI 用户（`go run ./cmd/client/main.go`）与 Web UI 用户可混合在线互通。
-
-```bash
-go run ./cmd/web -listen :8080 -tcp 127.0.0.1:8888
-```
-
-3）浏览器打开：
-
-```text
-http://127.0.0.1:8080/
-```
-
-### 截图说明（browser_container 不可用时）
-
-如果你的 Agent 运行环境没有提供 `browser_container` 工具（例如仅有 shell），可以用以下方式替代：
-
-1. 本地直接访问 `http://127.0.0.1:8080/`。
-2. 使用系统截图工具手动截取页面。
-3. 如果仓库已安装 Playwright/Puppeteer，可写自动化脚本产出截图；若未安装，不建议在受限环境中临时安装。
-
-> `browser_container` 不是项目内配置项，而是平台提供的能力；项目侧无法“开启”它。
-
-## 测试
-
-```bash
-go test ./...
-```
-
-> 当前仓库可能尚未包含完整测试用例，建议以多客户端联调为主。
+- **并发模型**：每个 TCP 连接一个 goroutine，消息通过 `channel` 分发
+- **认证中间件**：GET 路由统一使用 `authQueryMiddleware`，从 context 取用户身份
+- **数据库**：SQLite，使用参数化查询防 SQL 注入，事务保证好友关系一致性
+- **TLS**：`-tls` 标志启动时自动生成 ECDSA 自签名证书，无需手动配置
+- **优雅关闭**：捕获 SIGINT/SIGTERM，关闭 listener 释放端口
 
 ## License
 
-默认可按 MIT License 使用（如需发布请补充 `LICENSE` 文件）。
+MIT

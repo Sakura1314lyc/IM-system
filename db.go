@@ -1,7 +1,6 @@
 package main
 
 import (
-	"crypto/tls"
 	"database/sql"
 	"fmt"
 	"log"
@@ -182,9 +181,9 @@ func (d *Database) createDefaultUsers() error {
 		gender    string
 		signature string
 	}{
-		{"alice", "123", "👨‍💼", "female", "保持微笑，世界温柔。"},
-		{"bob", "123", "👩‍💼", "male", "代码即诗。"},
-		{"charlie", "123", "👨‍💻", "male", "永远在终端里历险。"},
+		{"alice", "123456", "👨‍💼", "female", "保持微笑，世界温柔。"},
+		{"bob", "123456", "👩‍💼", "male", "代码即诗。"},
+		{"charlie", "123456", "👨‍💻", "male", "永远在终端里历险。"},
 	}
 
 	for _, user := range defaultUsers {
@@ -587,13 +586,13 @@ func (d *Database) GetMessageHistory(limit int) ([]*DBMessage, error) {
 	return messages, nil
 }
 
-// 加好友
+// 加好友（双向关系）
 func (d *Database) AddFriend(userID int, friendID int) error {
 	if userID == friendID {
 		return fmt.Errorf("cannot add yourself as friend")
 	}
 
-	// 检查用户是否存在
+	// 检查对方用户是否存在
 	var exists int
 	err := d.db.QueryRow("SELECT id FROM users WHERE id = ?", friendID).Scan(&exists)
 	if err == sql.ErrNoRows {
@@ -603,38 +602,52 @@ func (d *Database) AddFriend(userID int, friendID int) error {
 		return fmt.Errorf("database error: %v", err)
 	}
 
-	// 添加好友关系（单向）
-	_, err = d.db.Exec(`
+	// 双向好友关系，使用事务保证原子性
+	tx, err := d.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %v", err)
+	}
+	defer tx.Rollback()
+
+	_, err = tx.Exec(`
 		INSERT OR IGNORE INTO friends (user_id, friend_id, status)
 		VALUES (?, ?, 'accepted')`, userID, friendID)
-
 	if err != nil {
 		return fmt.Errorf("failed to add friend: %v", err)
 	}
 
-	return nil
+	_, err = tx.Exec(`
+		INSERT OR IGNORE INTO friends (user_id, friend_id, status)
+		VALUES (?, ?, 'accepted')`, friendID, userID)
+	if err != nil {
+		return fmt.Errorf("failed to add reverse friend: %v", err)
+	}
+
+	return tx.Commit()
 }
 
-// 删除好友
+// 删除好友（双向）
 func (d *Database) RemoveFriend(userID int, friendID int) error {
-	result, err := d.db.Exec(`
-		DELETE FROM friends
-		WHERE user_id = ? AND friend_id = ?`, userID, friendID)
-
+	tx, err := d.db.Begin()
 	if err != nil {
-		return fmt.Errorf("failed to remove friend: %v", err)
+		return fmt.Errorf("failed to begin transaction: %v", err)
+	}
+	defer tx.Rollback()
+
+	for _, pair := range [][2]int{{userID, friendID}, {friendID, userID}} {
+		result, err := tx.Exec(`
+			DELETE FROM friends
+			WHERE user_id = ? AND friend_id = ?`, pair[0], pair[1])
+		if err != nil {
+			return fmt.Errorf("failed to remove friend: %v", err)
+		}
+		rows, _ := result.RowsAffected()
+		if rows == 0 {
+			return fmt.Errorf("friend not found")
+		}
 	}
 
-	rowsAffected, err := result.RowsAffected()
-	if err != nil {
-		return fmt.Errorf("failed to get rows affected: %v", err)
-	}
-
-	if rowsAffected == 0 {
-		return fmt.Errorf("friend not found")
-	}
-
-	return nil
+	return tx.Commit()
 }
 
 // 获取用户的好友列表
@@ -680,16 +693,4 @@ func (d *Database) IsFriend(userID int, friendID int) (bool, error) {
 	}
 
 	return true, nil
-}
-
-// generateSelfSignedCert generates a self-signed TLS certificate for development
-func generateSelfSignedCert() (tls.Certificate, error) {
-	// For development purposes, we'll try to load existing certs
-	// In production, use proper certificates
-	cert, err := tls.LoadX509KeyPair("server.crt", "server.key")
-	if err != nil {
-		// If certs don't exist, return an error
-		return tls.Certificate{}, fmt.Errorf("TLS certificates not found. Please generate server.crt and server.key for production use")
-	}
-	return cert, nil
 }

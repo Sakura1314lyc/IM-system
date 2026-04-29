@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>NekoChat</title>
-  <link rel="stylesheet" href="./styles.css?v=20260425-ui4" />
+  <link rel="stylesheet" href="./styles.css?v=20260429-ui7" />
 </head>
 <body>
   <div id="loginPanel" class="login-panel">
@@ -18,7 +18,7 @@
       </label>
       <label>
         密码
-        <input id="password" type="password" autocomplete="current-password" placeholder="默认密码 123" />
+        <input id="password" type="password" autocomplete="current-password" placeholder="默认密码 123456" />
       </label>
       <label class="avatar-upload">
         <input id="loginAvatarUpload" type="file" accept="image/*" />
@@ -27,20 +27,18 @@
       </label>
       <button id="connectBtn" class="primary-btn" type="button">登录 / 连接</button>
       <button id="registerBtn" class="secondary-btn" type="button">注册账号</button>
-      <small class="muted">默认用户：alice、bob、charlie；默认密码：123</small>
+      <small class="muted">默认用户：alice、bob、charlie；默认密码：123456</small>
     </form>
   </div>
 
   <div id="appPanel" class="app-shell" hidden>
     <aside class="scene-rail">
-      <div class="sakura-branch" aria-hidden="true"></div>
-      <button class="rail-logo" type="button" data-panel="home"><span>🐾</span><small>首页</small></button>
-      <button class="rail-item active" type="button" data-mode-jump="public"><span>💬</span><small>聊天</small></button>
-      <button class="rail-item" type="button" id="contactsRailBtn"><span>♧</span><small>联系人</small></button>
-      <button class="rail-item" type="button" id="groupsRailBtn"><span>☷</span><small>群组</small></button>
-      <button class="rail-item" type="button" id="discoverRailBtn"><span>⌖</span><small>发现</small></button>
-      <button class="rail-item" type="button" id="settingsRailBtn"><span>⚙</span><small>设置</small></button>
-      <div class="torii" aria-hidden="true"></div>
+      <button class="rail-logo" type="button" data-panel="home"><img src="./assets/images/neko-icon-home.png" alt="" /><small>首页</small></button>
+      <button class="rail-item active" type="button" data-mode-jump="public"><img src="./assets/images/neko-icon-chat.png" alt="" /><small>聊天</small></button>
+      <button class="rail-item" type="button" id="contactsRailBtn"><img src="./assets/images/neko-icon-contacts.png" alt="" /><small>联系人</small></button>
+      <button class="rail-item" type="button" id="groupsRailBtn"><img src="./assets/images/neko-icon-groups.png" alt="" /><small>群组</small></button>
+      <button class="rail-item" type="button" id="discoverRailBtn"><img src="./assets/images/neko-icon-thoughts.png" alt="" /><small>想法</small></button>
+      <button class="rail-item" type="button" id="settingsRailBtn"><img src="./assets/images/neko-icon-settings.png" alt="" /><small>设置</small></button>
     </aside>
 
     <section class="workbench">
@@ -58,7 +56,7 @@
           <button class="top-nav-btn active" type="button" data-mode="public"><span>●</span>聊天</button>
           <button class="top-nav-btn" type="button" id="contactsTopBtn"><span>♙</span>联系人</button>
           <button class="top-nav-btn" type="button" data-mode="group" id="groupsTopBtn"><span>☷</span>群组</button>
-          <button class="top-nav-btn" type="button" id="discoverTopBtn"><span>◉</span>发现</button>
+          <button class="top-nav-btn" type="button" id="discoverTopBtn"><span>✦</span>想法</button>
           <button class="top-nav-btn" type="button" id="settingsTopBtn"><span>⚙</span>设置</button>
         </nav>
         <button id="loadHistoryBtn" class="icon-btn" type="button" title="加载历史">↻</button>
@@ -105,8 +103,44 @@
           </div>
           <section id="messageList" class="messages"></section>
           <footer class="composer">
-            <button id="quickAddBtn" class="round-btn" type="button">#</button>
-            <button id="emojiBtn" class="round-btn" type="button">☺</button>
+            <div class="emoji-wrap">
+              <button id="emojiBtn" class="round-btn" type="button">☺</button>
+              <div id="emojiPicker" class="emoji-picker" hidden>
+                <div class="emoji-category">笑脸</div>
+                <div class="emoji-grid">
+                  <button type="button">😊</button><button type="button">😂</button><button type="button">🤣</button>
+                  <button type="button">❤️</button><button type="button">😍</button><button type="button">🥰</button>
+                  <button type="button">😘</button><button type="button">😗</button><button type="button">😙</button>
+                  <button type="button">😋</button><button type="button">😜</button><button type="button">🤪</button>
+                  <button type="button">😎</button><button type="button">🤩</button><button type="button">🥳</button>
+                  <button type="button">😏</button><button type="button">😒</button><button type="button">😞</button>
+                  <button type="button">😔</button><button type="button">😟</button><button type="button">😕</button>
+                  <button type="button">😣</button><button type="button">😖</button><button type="button">😫</button>
+                  <button type="button">😤</button><button type="button">😡</button><button type="button">🤬</button>
+                  <button type="button">😈</button><button type="button">👿</button><button type="button">💀</button>
+                </div>
+                <div class="emoji-category">手势</div>
+                <div class="emoji-grid">
+                  <button type="button">👍</button><button type="button">👎</button><button type="button">👊</button>
+                  <button type="button">✊</button><button type="button">🤛</button><button type="button">🤜</button>
+                  <button type="button">👏</button><button type="button">🙌</button><button type="button">🤲</button>
+                  <button type="button">🤝</button><button type="button">🙏</button><button type="button">✌️</button>
+                  <button type="button">🤟</button><button type="button">🤘</button><button type="button">👌</button>
+                  <button type="button">💪</button><button type="button">🖕</button><button type="button">🫶</button>
+                </div>
+                <div class="emoji-category">常用</div>
+                <div class="emoji-grid">
+                  <button type="button">🎉</button><button type="button">🎊</button><button type="button">✨</button>
+                  <button type="button">🔥</button><button type="button">💯</button><button type="button">⭐</button>
+                  <button type="button">💡</button><button type="button">📌</button><button type="button">🎯</button>
+                  <button type="button">💤</button><button type="button">😴</button><button type="button">🤔</button>
+                  <button type="button">🤗</button><button type="button">🫂</button><button type="button">💩</button>
+                  <button type="button">👋</button><button type="button">🖐️</button><button type="button">✋</button>
+                  <button type="button">💖</button><button type="button">💝</button><button type="button">🦊</button>
+                  <button type="button">🐱</button><button type="button">🐶</button><button type="button">🌸</button>
+                </div>
+              </div>
+            </div>
             <textarea id="messageInput" rows="1" placeholder="输入消息，Enter 发送，Shift + Enter 换行"></textarea>
             <button id="sendBtn" class="send-btn" type="button">➤</button>
           </footer>
@@ -198,11 +232,26 @@
 
   <dialog id="discoverDialog" class="app-dialog">
     <form method="dialog" class="dialog-card discover-card">
-      <header><h2>发现</h2><button class="close-dialog" value="cancel">×</button></header>
+      <header><h2>想法</h2><button class="close-dialog" value="cancel">×</button></header>
+      <section class="thought-composer">
+        <div id="thoughtComposerAvatar" class="thought-avatar"></div>
+        <textarea id="thoughtInput" rows="3" placeholder="记录今天的想法，分享给好友看看..."></textarea>
+        <div class="thought-tools">
+          <div id="topicTags" class="topic-tags">
+            <button type="button" class="topic-tag" data-tag="日常"># 日常</button>
+            <button type="button" class="topic-tag" data-tag="开心"># 开心</button>
+            <button type="button" class="topic-tag" data-tag="摸鱼"># 摸鱼</button>
+            <button type="button" class="topic-tag" data-tag="项目"># 项目</button>
+            <button type="button" class="topic-tag" data-tag="求助"># 求助</button>
+            <button type="button" class="topic-tag" data-tag="分享"># 分享</button>
+          </div>
+          <button id="publishThoughtBtn" class="primary-btn" type="button">发布想法</button>
+        </div>
+      </section>
       <section class="discover-grid">
         <button id="discoverPublicBtn" class="discover-tile" type="button">
           <b>公共频道</b>
-          <span>查看所有在线用户可见的消息</span>
+          <span>回到所有在线用户可见的聊天</span>
         </button>
         <button id="discoverOnlineBtn" class="discover-tile" type="button">
           <b>在线用户</b>
@@ -218,17 +267,21 @@
         </button>
       </section>
       <section class="discover-section">
+        <h3>好友动态</h3>
+        <ul id="thoughtFeed" class="thought-feed"></ul>
+      </section>
+      <section class="discover-section">
         <h3>当前在线</h3>
-        <ul id="discoverOnlineList" class="group-list"></ul>
+        <ul id="discoverOnlineList" class="group-list compact-list"></ul>
       </section>
       <footer>
-        <button id="discoverRefreshBtn" class="secondary-btn" type="button">刷新发现</button>
+        <button id="discoverRefreshBtn" class="secondary-btn" type="button">刷新想法</button>
         <button id="discoverAddFriendBtn" class="primary-btn" type="button">添加好友</button>
       </footer>
     </form>
   </dialog>
 
   <div id="toastHost" class="toast-host"></div>
-  <script src="./app.js?v=20260425-ui4"></script>
+  <script src="./app.js?v=20260429-ui7"></script>
 </body>
 </html>
