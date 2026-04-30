@@ -3,8 +3,8 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
-	"reflect"
 	"strconv"
 	"strings"
 	"time"
@@ -118,7 +118,7 @@ func applyEnvOverrides(cfg *Config) {
 		"IM_SERVER_IP":      func() { cfg.Server.IP = getEnv("IM_SERVER_IP") },
 		"IM_SERVER_PORT":    func() { cfg.Server.Port = getEnvInt("IM_SERVER_PORT") },
 		"IM_SERVER_TLS":     func() { cfg.Server.TLS = getEnvBool("IM_SERVER_TLS") },
-		"IM_IDLE_TIMEOUT":   func() { cfg.Server.IdleTimeout = parseEnvDuration("IM_IDLE_TIMEOUT") },
+		"IM_SERVER_IDLE_TIMEOUT": func() { cfg.Server.IdleTimeout = parseEnvDuration("IM_SERVER_IDLE_TIMEOUT") },
 		"IM_WEB_ADDR":       func() { cfg.Web.Addr = getEnv("IM_WEB_ADDR") },
 	"IM_UPLOAD_DIR":	func() { cfg.Web.UploadDir = getEnv("IM_UPLOAD_DIR") },
 		"IM_DB_PATH":        func() { cfg.DB.Path = getEnv("IM_DB_PATH") },
@@ -152,6 +152,7 @@ func getEnvInt(key string) int {
 	}
 	n, err := strconv.Atoi(v)
 	if err != nil {
+		slog.Warn("invalid integer env var, using default", "key", key, "value", v)
 		return 0
 	}
 	return n
@@ -166,6 +167,7 @@ func getEnvBool(key string) bool {
 	case "1", "true", "yes", "on":
 		return true
 	}
+	slog.Warn("invalid bool env var, using default", "key", key, "value", v)
 	return false
 }
 
@@ -176,6 +178,7 @@ func parseEnvDuration(key string) Duration {
 	}
 	d, err := time.ParseDuration(v)
 	if err != nil {
+		slog.Warn("invalid duration env var, using default", "key", key, "value", v)
 		return Duration(0)
 	}
 	return Duration(d)
@@ -193,6 +196,3 @@ func SetLookupEnv(fn func(string) (string, bool)) {
 func ResetLookupEnv() {
 	lookupEnv = os.LookupEnv
 }
-
-// Ensure config struct fields are documented and complete.
-var _ = reflect.TypeOf(Config{})

@@ -9,6 +9,8 @@ import (
 	"strings"
 )
 
+const maxAvatarSize = 2 * 1024 * 1024 // 2MB
+
 func saveAvatarFile(uploadDir, username, avatarData string) (string, error) {
 	// Already a URL path, return as-is
 	if strings.HasPrefix(avatarData, "/") {
@@ -54,6 +56,11 @@ func saveAvatarFile(uploadDir, username, avatarData string) (string, error) {
 		}
 	}
 
+	// Validate size
+	if len(decoded) > maxAvatarSize {
+		return "", fmt.Errorf("avatar too large: %d bytes max", maxAvatarSize)
+	}
+
 	// Create upload directory
 	avatarDir := filepath.Join(uploadDir, "avatars")
 	if err := os.MkdirAll(avatarDir, 0755); err != nil {
@@ -64,7 +71,13 @@ func saveAvatarFile(uploadDir, username, avatarData string) (string, error) {
 	cleanupOldAvatars(avatarDir, username)
 
 	// Write new avatar file
-	filename := username + ext
+	safeName := strings.Map(func(r rune) rune {
+		if r == '/' || r == '\\' || r == ':' || r == '.' {
+			return '_'
+		}
+		return r
+	}, username)
+	filename := safeName + ext
 	filePath := filepath.Join(avatarDir, filename)
 	if err := os.WriteFile(filePath, decoded, 0644); err != nil {
 		return "", fmt.Errorf("failed to write avatar file: %w", err)

@@ -6,7 +6,8 @@
         "idle_timeout": "1s"
     },
     "web": {
-        "addr": ":0"
+        "addr": ":0",
+        "upload_dir": "uploads"
     },
     "db": {
         "path": ":memory:"

@@ -1,12 +1,14 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"IM-system/internal/config"
 	"IM-system/internal/server"
@@ -43,7 +45,11 @@ func main() {
 		}
 	})
 
-	srv := server.New(cfg)
+	srv, err := server.New(cfg)
+	if err != nil {
+		slog.Error("failed to create server", "error", err)
+		return
+	}
 
 	go srv.Start()
 	go srv.StartWeb()
@@ -58,8 +64,15 @@ func main() {
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
-	<-sigCh
-	slog.Info("shutting down server")
+	sig := <-sigCh
+	slog.Info("shutting down...", "signal", sig)
+
+	// Graceful shutdown with timeout
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer shutdownCancel()
+
 	srv.Shutdown()
+
+	<-shutdownCtx.Done()
 	slog.Info("server stopped")
 }

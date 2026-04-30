@@ -6,7 +6,6 @@ import (
 	"flag"
 	"fmt"
 	"log"
-	"math/rand"
 	"net"
 	"net/http"
 	"os"
@@ -14,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	crypto_rand "crypto/rand"
 )
 
 var (
@@ -81,8 +82,10 @@ func handleConnect(w http.ResponseWriter, _ *http.Request) {
 		return
 	}
 
+	b := make([]byte, 8)
+	crypto_rand.Read(b)
 	s := &session{
-		id:       fmt.Sprintf("%d-%d", time.Now().UnixNano(), rand.Intn(99999)),
+		id:       fmt.Sprintf("%x", b),
 		tcpConn:  tcpConn,
 		messages: make(chan string, 256),
 		closed:   make(chan struct{}),
@@ -139,6 +142,8 @@ func handleSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	msg := strings.TrimSpace(req.Message)
+	msg = strings.ReplaceAll(msg, "\n", " ")
+	msg = strings.ReplaceAll(msg, "\r", " ")
 	if msg == "" {
 		writeJSON(w, map[string]bool{"ok": true})
 		return

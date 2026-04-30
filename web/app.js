@@ -33,6 +33,19 @@ const DOM = {
   targetBar: $('targetBar'),
   onlineList: $('onlineList'),
   recentList: $('recentList'),
+  groupSessionList: $('groupSessionList'),
+  groupSessionCount: $('groupSessionCount'),
+  sideOnlineList: $('sideOnlineList'),
+  sideGroupList: $('sideGroupList'),
+  wsStatus: $('wsStatus'),
+  memberMetric: $('memberMetric'),
+  todayMetric: $('todayMetric'),
+  themeQuickBtn: $('themeQuickBtn'),
+  quickAddFriendBtn: $('quickAddFriendBtn'),
+  quickCreateGroupBtn: $('quickCreateGroupBtn'),
+  quickUploadAvatarBtn: $('quickUploadAvatarBtn'),
+  imageToolBtn: $('imageToolBtn'),
+  fileToolBtn: $('fileToolBtn'),
   onlineCount: $('onlineCount'),
   friendCount: $('friendCount'),
   statFriends: $('statFriends'),
@@ -59,7 +72,6 @@ const DOM = {
   discoverOnlineList: $('discoverOnlineList'),
   thoughtComposerAvatar: $('thoughtComposerAvatar'),
   thoughtInput: $('thoughtInput'),
-  thoughtMood: $('thoughtMood'),
   publishThoughtBtn: $('publishThoughtBtn'),
   thoughtFeed: $('thoughtFeed'),
   viewProfileBtn: $('viewProfileBtn'),
@@ -105,13 +117,13 @@ const state = {
   messages: 0,
   uploadedAvatar: '',
   ws: null,
-  wsReconnectTimer: null
+  wsReconnectTimer: null,
+  wsRetries: 0
 };
 
 function escapeHtml(value) {
-  const div = document.createElement('div');
-  div.textContent = value ?? '';
-  return div.innerHTML;
+  const s = String(value ?? '');
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
 function avatarMarkup(avatar, label = '头像') {
@@ -125,25 +137,43 @@ function setAvatar(el, avatar) {
 
 function toast(message, type = 'info') {
   const el = document.createElement('div');
-  el.className = `toast ${type}`;
+  el.className = `toast toast-${type}`;
   el.textContent = message;
   DOM.toastHost.appendChild(el);
+  while (DOM.toastHost.children.length > 5) {
+    DOM.toastHost.children[0].remove();
+  }
   window.setTimeout(() => el.remove(), 2800);
 }
 
 async function api(endpoint, options = {}) {
-  const response = await fetch(endpoint, {
-    method: options.method || 'GET',
-    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
-    body: options.body ? JSON.stringify(options.body) : undefined
-  });
-  if (!response.ok) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15000);
+  try {
+    const headers = options.headers || {};
+    headers['Content-Type'] = 'application/json';
+    if (state.token) {
+      headers['Authorization'] = 'Bearer ' + state.token;
+    }
+    const body = options.body ? JSON.stringify(options.body) : undefined;
+    const response = await fetch(endpoint, {
+      ...options,
+      body,
+      headers,
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      const text = await response.text().catch(() => '');
+      throw new Error(text || `HTTP ${response.status}`);
+    }
     const text = await response.text();
-    throw new Error(text || `HTTP ${response.status}`);
+    return text ? JSON.parse(text) : {};
+  } catch (err) {
+    if (err.name === 'AbortError') throw new Error('请求超时');
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
   }
-  if (response.status === 204) return null;
-  const contentType = response.headers.get('content-type') || '';
-  return contentType.includes('application/json') ? response.json() : response.text();
 }
 
 function showApp() {
@@ -165,6 +195,29 @@ function nowLabel(dateLike) {
 function setMessageCount(nextValue) {
   state.messages = nextValue;
   DOM.statMessages.textContent = state.messages.toLocaleString();
+  if (DOM.todayMetric) DOM.todayMetric.textContent = `今日消息 ${state.messages.toLocaleString()}`;
+}
+
+function setConnectionStatus(connected) {
+  if (!DOM.wsStatus) return;
+  DOM.wsStatus.classList.toggle('online', connected);
+  DOM.wsStatus.classList.toggle('offline', !connected);
+  DOM.wsStatus.querySelector('b').textContent = connected ? '已连接' : '未连接';
+}
+
+function renderSidePanels() {
+  if (DOM.memberMetric) DOM.memberMetric.textContent = `成员 ${state.onlineUsers.length.toLocaleString()}`;
+  if (DOM.sideOnlineList) {
+    const online = state.onlineUsers.filter((user) => user.name !== state.username).slice(0, 6);
+    DOM.sideOnlineList.innerHTML = online.length
+      ? online.map((user) => `<li><span>${escapeHtml(user.name)}</span><b>在线</b></li>`).join('')
+      : '<li><span>暂无其他在线用户</span><b>等待中</b></li>';
+  }
+  if (DOM.sideGroupList) {
+    DOM.sideGroupList.innerHTML = state.groups.length
+      ? state.groups.slice(0, 6).map((name) => `<li><span>${escapeHtml(name)}</span><b>群组</b></li>`).join('')
+      : '<li><span>暂无群组</span><b>创建一个</b></li>';
+  }
 }
 
 function emptyState(title, detail = '', tag = 'div') {
@@ -188,7 +241,11 @@ function addMessage({ text, type = 'incoming', avatar = '', time = nowLabel(), s
     el.className = 'system-msg';
     el.textContent = text;
     DOM.messageList.appendChild(el);
-    DOM.messageList.scrollTop = DOM.messageList.scrollHeight;
+    const el2 = DOM.messageList;
+    const isNearBottom = el2.scrollHeight - el2.scrollTop - el2.clientHeight < 200;
+    if (isNearBottom) {
+      el2.scrollTop = el2.scrollHeight;
+    }
     return;
   }
 
@@ -206,8 +263,11 @@ function addMessage({ text, type = 'incoming', avatar = '', time = nowLabel(), s
     if (profileTarget) openProfile(profileTarget);
   });
   DOM.messageList.appendChild(row);
-  DOM.messageList.scrollTop = DOM.messageList.scrollHeight;
-  setMessageCount(state.messages + 1);
+  const el = DOM.messageList;
+  const isNearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 200;
+  if (isNearBottom) {
+    el.scrollTop = el.scrollHeight;
+  }
 }
 
 function updateChatTitle() {
@@ -274,12 +334,52 @@ function sessionItem(session) {
   return li;
 }
 
+function groupSessionItem(name) {
+  const li = document.createElement('li');
+  li.className = 'session-card group-session';
+  li.dataset.name = name.toLowerCase();
+  li.dataset.filter = 'group';
+  li.innerHTML = `
+    <button class="session-avatar" type="button" title="进入群组"><span>群</span></button>
+    <div class="session-info">
+      <div class="session-head">
+        <span class="session-name">${escapeHtml(name)}<span class="group-tag">Group</span></span>
+        <span class="session-time">群聊</span>
+      </div>
+      <p class="session-preview">进入群组频道，继续闪闪发光的讨论。</p>
+    </div>
+    <span class="badge">G</span>
+  `;
+  li.addEventListener('click', () => {
+    DOM.toGroup.value = name;
+    DOM.inviteGroupName.value = name;
+    setMode('group');
+    document.querySelectorAll('.session-card').forEach((item) => {
+      item.classList.toggle('active', item === li);
+    });
+    loadHistory('group', name).catch((err) => toast(err.message, 'error'));
+  });
+  return li;
+}
+
+function renderGroupSessions() {
+  if (!DOM.groupSessionList) return;
+  if (DOM.groupSessionCount) DOM.groupSessionCount.textContent = state.groups.length.toLocaleString();
+  DOM.groupSessionList.innerHTML = '';
+  if (state.groups.length === 0) {
+    DOM.groupSessionList.innerHTML = emptyState('暂无群组', '创建或加入群组后会出现在这里。', 'li');
+    return;
+  }
+  state.groups.forEach((name) => DOM.groupSessionList.appendChild(groupSessionItem(name)));
+}
+
 function renderSessionList() {
   const online = state.onlineUsers.filter((user) => user.name !== state.username);
   const friendsByName = new Map(state.friends.map((friend) => [friend.name, friend]));
   DOM.onlineCount.textContent = online.length.toLocaleString();
   DOM.friendCount.textContent = state.friends.length.toLocaleString();
   DOM.statFriends.textContent = state.friends.length.toLocaleString();
+  renderSidePanels();
 
   DOM.onlineList.innerHTML = '';
   if (online.length === 0) {
@@ -327,17 +427,19 @@ async function refreshOnline() {
 
 async function refreshFriends() {
   if (!state.token) return;
-  const data = await api(`/api/friends?token=${encodeURIComponent(state.token)}`);
+  const data = await api('/api/friends');
   state.friends = data.friends || [];
   renderSessionList();
 }
 
 async function refreshGroups() {
   if (!state.token) return;
-  const data = await api(`/api/groups?token=${encodeURIComponent(state.token)}`);
+  const data = await api('/api/groups');
   state.groups = data.groups || [];
   DOM.statGroups.textContent = state.groups.length.toLocaleString();
   renderGroups();
+  renderGroupSessions();
+  renderSidePanels();
 }
 
 function renderGroups() {
@@ -528,7 +630,7 @@ async function openDiscover() {
 async function createOrJoinGroup(action) {
   const groupName = DOM.newGroupName.value.trim();
   if (!groupName) return toast('请输入群组名', 'error');
-  await api('/api/group', { method: 'POST', body: { token: state.token, action, groupName } });
+  await api('/api/group', { method: 'POST', body: { action, groupName } });
   DOM.newGroupName.value = '';
   await refreshGroups();
   toast(action === 'create' ? '群组已创建' : '已加入群组');
@@ -538,20 +640,20 @@ async function inviteToGroup() {
   const memberName = DOM.inviteMemberName.value.trim();
   const groupName = DOM.inviteGroupName.value.trim() || DOM.toGroup.value.trim();
   if (!memberName || !groupName) return toast('请输入成员用户名和群组名', 'error');
-  await api('/api/group', { method: 'POST', body: { token: state.token, action: 'invite', groupName, memberName } });
+  await api('/api/group', { method: 'POST', body: { action: 'invite', groupName, memberName } });
   DOM.inviteMemberName.value = '';
   toast('已邀请成员加入群组');
 }
 
 async function leaveGroup(groupName) {
-  await api('/api/group', { method: 'POST', body: { token: state.token, action: 'leave', groupName } });
+  await api('/api/group', { method: 'POST', body: { action: 'leave', groupName } });
   await refreshGroups();
   toast('已离开群组');
 }
 
 async function loadHistory(type = state.mode, target = '') {
   if (!state.token) return;
-  const params = new URLSearchParams({ token: state.token, type, limit: '300' });
+  const params = new URLSearchParams({ type, limit: '300' });
   if (type === 'private') params.set('peer', target || DOM.toUser.value.trim());
   if (type === 'group') params.set('group', target || DOM.toGroup.value.trim());
   if ((type === 'private' && !params.get('peer')) || (type === 'group' && !params.get('group'))) {
@@ -583,6 +685,7 @@ async function login() {
   if (!username || !password) return toast('请输入用户名和密码', 'error');
 
   const data = await api('/api/login', { method: 'POST', body: { username, password } });
+  if (!data || !data.token) throw new Error('登录响应异常，缺少 token');
   state.token = data.token;
   state.username = username;
   state.avatar = data.avatar || '🐱';
@@ -597,10 +700,11 @@ async function login() {
   [DOM.headerAvatarBtn, DOM.chatAvatarBtn, DOM.profileDialogAvatar].forEach((el) => setAvatar(el, state.avatar));
 
   showApp();
-  openWS();
   setMode('public');
   resetMessages('暂无消息', '公共频道会显示真实聊天内容。');
-  await Promise.allSettled([refreshOnline(), refreshFriends(), refreshGroups(), loadHistory('public')]);
+  await Promise.allSettled([refreshOnline(), refreshFriends(), refreshGroups()]);
+  await loadHistory('public');
+  openWS();
 }
 
 async function register() {
@@ -618,24 +722,47 @@ async function register() {
 }
 
 function openWS() {
-  state.ws?.close();
-  state.ws = new WebSocket(`ws://${location.host}/api/ws?token=${encodeURIComponent(state.token)}`);
+  try { state.ws?.close(); } catch (_) {}
+  setConnectionStatus(false);
+  const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const ws = new WebSocket(`${protocol}//${location.host}/api/ws?token=${encodeURIComponent(state.token)}`);
+  state.ws = ws;
 
-  state.ws.onopen = () => {
-    addMessage({ text: '已连接到服务器', system: true });
+  ws.onopen = () => {
+    if (state.ws === ws) {
+      setConnectionStatus(true);
+      state.wsRetries = 0;
+    }
   };
 
-  state.ws.onmessage = (event) => {
+  ws.onclose = () => {
+    if (state.ws === ws) {
+      state.ws = null;
+      setConnectionStatus(false);
+      // Auto reconnect
+      if (state.token) {
+        const delay = Math.min(2 ** (state.wsRetries || 0) * 1000, 30000);
+        state.wsRetries = (state.wsRetries || 0) + 1;
+        state.wsReconnectTimer = setTimeout(() => openWS(), delay);
+      }
+    }
+  };
+
+  ws.onerror = () => {
+    // WebSocket closes itself on error, onclose handles reconnection
+  };
+
+  ws.onmessage = (event) => {
     try {
       const data = JSON.parse(event.data);
       switch (data.type) {
         case 'message':
-          if (data.mode === 'public' && data.from === state.username) return;
+          if (data.from === state.username) return;
           const parsed = parseIncomingSender(data.content);
           addMessage({
             text: data.content,
-            avatar: state.selectedPeerAvatar || '🐱',
-            sender: parsed || state.selectedPeer,
+            avatar: data.avatar || '🐱',
+            sender: data.from || parsed || '',
             time: data.time
           });
           break;
@@ -656,18 +783,9 @@ function openWS() {
           });
           break;
       }
-    } catch (_) {
-      // ignore unparseable messages
+    } catch (e) {
+      console.error('ws message parse error', e);
     }
-  };
-
-  state.ws.onclose = () => {
-    state.ws = null;
-    toast('实时连接已断开', 'error');
-  };
-
-  state.ws.onerror = () => {
-    state.ws?.close();
   };
 }
 
@@ -679,19 +797,27 @@ async function sendMessage() {
     if (!to) return toast('请选择私聊对象', 'error');
     if (state.ws?.readyState === WebSocket.OPEN) {
       state.ws.send(JSON.stringify({ type: 'send', mode: 'private', to, message: text }));
+      DOM.messageInput.value = '';
+    } else {
+      toast('连接未就绪，消息未发送', 'error');
     }
   } else if (state.mode === 'group') {
     const to = DOM.toGroup.value.trim();
     if (!to) return toast('请输入群组名', 'error');
     if (state.ws?.readyState === WebSocket.OPEN) {
       state.ws.send(JSON.stringify({ type: 'send', mode: 'group', to, message: text }));
+      DOM.messageInput.value = '';
+    } else {
+      toast('连接未就绪，消息未发送', 'error');
     }
   } else {
     if (state.ws?.readyState === WebSocket.OPEN) {
       state.ws.send(JSON.stringify({ type: 'send', mode: 'public', message: text }));
+      DOM.messageInput.value = '';
+    } else {
+      toast('连接未就绪，消息未发送', 'error');
     }
   }
-  DOM.messageInput.value = '';
 }
 
 function parseIncomingSender(text) {
@@ -706,21 +832,22 @@ function parseIncomingSender(text) {
 }
 
 async function logout() {
-  state.ws?.close();
+  if (state.wsReconnectTimer) {
+    clearTimeout(state.wsReconnectTimer);
+    state.wsReconnectTimer = null;
+  }
+  try { state.ws?.close(); } catch (_) {}
   state.ws = null;
+  setConnectionStatus(false);
   if (state.token) {
-    try { await api('/api/logout', { method: 'POST', body: { token: state.token } }); } catch (_) {}
+    try { await api('/api/logout', { method: 'POST', body: {} }); } catch (_) {}
   }
   Object.assign(state, {
-    token: '',
-    username: '',
-    avatar: '🐱',
-    selectedPeer: '',
-    selectedPeerAvatar: '🐱',
-    groups: [],
-    friends: [],
-    onlineUsers: [],
-    messages: 0
+    token: '', username: '', avatar: '🐱',
+    selectedPeer: '', selectedPeerAvatar: '🐱',
+    groups: [], friends: [], onlineUsers: [], messages: 0,
+    uploadedAvatar: null, gender: '', signature: '',
+    thoughts: [], wsReconnectTimer: null, wsRetries: 0
   });
   showLogin();
 }
@@ -754,7 +881,7 @@ async function openProfile(targetUsername = state.username) {
   if (!state.token) return;
   try {
     const target = targetUsername || state.username;
-    const data = await api(`/api/profile?token=${encodeURIComponent(state.token)}&user=${encodeURIComponent(target)}`);
+    const data = await api(`/api/profile?user=${encodeURIComponent(target)}`);
     const isSelf = data.isSelf !== false;
     if (isSelf) {
       state.avatar = data.avatar || state.avatar;
@@ -785,12 +912,12 @@ async function saveProfile() {
   if (!nextName) return toast('昵称不能为空', 'error');
 
   if (nextName !== state.username) {
-    await api('/api/rename', { method: 'POST', body: { token: state.token, new: nextName } });
+    await api('/api/rename', { method: 'POST', body: { new: nextName } });
     state.username = nextName;
     DOM.userNameDisplay.textContent = nextName;
     DOM.profileUsername.textContent = `@${nextName}`;
   }
-  await api('/api/profile', { method: 'POST', body: { token: state.token, gender, signature } });
+  await api('/api/profile', { method: 'POST', body: { gender, signature } });
   state.gender = gender;
   state.signature = signature;
   DOM.profileSignature.textContent = signature || '把简单的事情做漂亮 🌸';
@@ -800,7 +927,7 @@ async function saveProfile() {
 
 async function saveAvatar() {
   if (!state.uploadedAvatar) return toast('请先选择头像', 'error');
-  const data = await api('/api/avatar', { method: 'POST', body: { token: state.token, avatar: state.uploadedAvatar } });
+  const data = await api('/api/avatar', { method: 'POST', body: { avatar: state.uploadedAvatar } });
   state.avatar = data?.avatar || state.uploadedAvatar;
   state.uploadedAvatar = '';
   [DOM.headerAvatarBtn, DOM.chatAvatarBtn, DOM.profileDialogAvatar].forEach((el) => setAvatar(el, state.avatar));
@@ -844,7 +971,7 @@ async function addFriend(friendName = DOM.friendNameInput.value.trim() || state.
   if (friendName === state.username) return toast('不能添加自己为好友', 'error');
   await api('/api/friend', {
     method: 'POST',
-    body: { token: state.token, action: 'add', friend: friendName }
+    body: { action: 'add', friend: friendName }
   });
   DOM.friendNameInput.value = '';
   await refreshFriends();
@@ -855,7 +982,7 @@ async function addFriend(friendName = DOM.friendNameInput.value.trim() || state.
 async function removeFriend(friendName) {
   await api('/api/friend', {
     method: 'POST',
-    body: { token: state.token, action: 'remove', friend: friendName }
+    body: { action: 'remove', friend: friendName }
   });
   await refreshFriends();
   renderFriendsDialog();
@@ -955,6 +1082,21 @@ function bindEvents() {
   ['groupsRailBtn', 'groupsTopBtn'].forEach((id) => $(id)?.addEventListener('click', () => refreshGroups().then(() => DOM.groupsDialog.showModal()).catch((err) => toast(err.message, 'error'))));
   ['contactsRailBtn', 'contactsTopBtn'].forEach((id) => $(id)?.addEventListener('click', () => loadFriendsDialog().catch((err) => toast(err.message, 'error'))));
   ['settingsTopBtn', 'settingsRailBtn'].forEach((id) => $(id)?.addEventListener('click', () => DOM.settingsDialog.showModal()));
+  DOM.quickAddFriendBtn?.addEventListener('click', () => {
+    DOM.contactsDialog.showModal();
+    DOM.friendNameInput.focus();
+  });
+  DOM.quickCreateGroupBtn?.addEventListener('click', () => {
+    DOM.groupsDialog.showModal();
+    DOM.newGroupName.focus();
+  });
+  DOM.quickUploadAvatarBtn?.addEventListener('click', () => openProfile(state.username));
+  DOM.themeQuickBtn?.addEventListener('click', () => {
+    DOM.darkModeToggle.checked = !DOM.darkModeToggle.checked;
+    DOM.darkModeToggle.dispatchEvent(new Event('change'));
+  });
+  DOM.imageToolBtn?.addEventListener('click', () => toast('图片发送入口已准备，当前后端未提供文件消息接口'));
+  DOM.fileToolBtn?.addEventListener('click', () => toast('文件发送入口已准备，当前后端未提供文件消息接口'));
   $('discoverRailBtn').addEventListener('click', () => openDiscover().catch((err) => toast(err.message, 'error')));
   $('discoverTopBtn').addEventListener('click', () => openDiscover().catch((err) => toast(err.message, 'error')));
   DOM.discoverRefreshBtn.addEventListener('click', () => openDiscover().catch((err) => toast(err.message, 'error')));
@@ -1060,9 +1202,11 @@ function init() {
   DOM.fontSizeValue.textContent = `${DOM.fontSizeSlider.value}px`;
   document.body.style.fontSize = `${DOM.fontSizeSlider.value}px`;
   document.body.classList.toggle('dark-mode', DOM.darkModeToggle.checked);
-  setAvatar(DOM.chatAvatarBtn, '🐾');
   loadThoughts();
   renderSessionList();
+  renderGroupSessions();
+  renderSidePanels();
+  setConnectionStatus(false);
   resetMessages();
   bindEvents();
 }

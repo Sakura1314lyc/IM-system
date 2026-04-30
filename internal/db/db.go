@@ -2,6 +2,7 @@ package db
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -192,7 +193,7 @@ func (d *Database) RegisterUser(username, password, avatar string) error {
 		username, string(hashedPassword), avatar)
 
 	if err != nil {
-		if sqliteErr, ok := err.(sqlite3.Error); ok && sqliteErr.ExtendedCode == sqlite3.ErrConstraintUnique {
+		var sqliteErr sqlite3.Error; if errors.As(err, &sqliteErr) && sqliteErr.ExtendedCode == sqlite3.ErrConstraintUnique {
 			return fmt.Errorf("username already exists")
 		}
 		return fmt.Errorf("failed to register user: %v", err)
@@ -225,7 +226,7 @@ func (d *Database) CreateGroup(name string, creatorID int, description string) (
 		name, creatorID, description)
 
 	if err != nil {
-		if sqliteErr, ok := err.(sqlite3.Error); ok && sqliteErr.ExtendedCode == sqlite3.ErrConstraintUnique {
+		var sqliteErr sqlite3.Error; if errors.As(err, &sqliteErr) && sqliteErr.ExtendedCode == sqlite3.ErrConstraintUnique {
 			return nil, fmt.Errorf("group name already exists")
 		}
 		return nil, fmt.Errorf("failed to create group: %v", err)
@@ -510,7 +511,12 @@ func (d *Database) AddFriend(userID int, friendID int) error {
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %v", err)
 	}
-	defer tx.Rollback()
+	committed := false
+	defer func() {
+		if !committed {
+			tx.Rollback()
+		}
+	}()
 
 	_, err = tx.Exec(`
 		INSERT OR IGNORE INTO friends (user_id, friend_id, status)
@@ -526,7 +532,11 @@ func (d *Database) AddFriend(userID int, friendID int) error {
 		return fmt.Errorf("failed to add reverse friend: %v", err)
 	}
 
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit: %v", err)
+	}
+	committed = true
+	return nil
 }
 
 // 删除好友（双向）
@@ -535,7 +545,12 @@ func (d *Database) RemoveFriend(userID int, friendID int) error {
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %v", err)
 	}
-	defer tx.Rollback()
+	committed := false
+	defer func() {
+		if !committed {
+			tx.Rollback()
+		}
+	}()
 
 	for _, pair := range [][2]int{{userID, friendID}, {friendID, userID}} {
 		result, err := tx.Exec(`
@@ -550,7 +565,11 @@ func (d *Database) RemoveFriend(userID int, friendID int) error {
 		}
 	}
 
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit: %v", err)
+	}
+	committed = true
+	return nil
 }
 
 // 获取用户的好友列表

@@ -28,6 +28,11 @@ func (s *Server) authQueryMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		token := strings.TrimSpace(r.URL.Query().Get("token"))
 		if token == "" {
+			if auth := r.Header.Get("Authorization"); len(auth) > 7 && strings.EqualFold(auth[:7], "Bearer ") {
+				token = strings.TrimSpace(auth[7:])
+			}
+		}
+		if token == "" {
 			http.Error(w, "缺少登录 token", http.StatusBadRequest)
 			return
 		}
@@ -48,11 +53,54 @@ func getUserFromContext(r *http.Request) string {
 	return ""
 }
 
+// getTokenFromRequest extracts token from Authorization: Bearer header, then falls back to query param
+func getTokenFromRequest(r *http.Request) string {
+	if auth := r.Header.Get("Authorization"); len(auth) > 7 && strings.EqualFold(auth[:7], "Bearer ") {
+		if t := strings.TrimSpace(auth[7:]); t != "" {
+			return t
+		}
+	}
+	return strings.TrimSpace(r.URL.Query().Get("token"))
+}
+
+func decodeJSONBody(r *http.Request, dst interface{}) error {
+	r.Body = http.MaxBytesReader(nil, r.Body, 1<<20) // 1MB
+	return json.NewDecoder(r.Body).Decode(dst)
+}
+
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+		if r.Method == http.MethodOptions {
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+		w.Header().Set("Pragma", "no-cache")
+		w.Header().Set("Expires", "0")
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (s *Server) getClientIP(r *http.Request) string {
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		parts := strings.Split(xff, ",")
+		return strings.TrimSpace(parts[0])
+	}
+	if xri := r.Header.Get("X-Real-IP"); xri != "" {
+		return strings.TrimSpace(xri)
+	}
+	ip, _, _ := net.SplitHostPort(r.RemoteAddr)
+	return ip
+}
+
 func (s *Server) StartWeb() {
 	addr := s.webAddr
 	mux := http.NewServeMux()
-	mux.Handle("/", noCache(http.FileServer(http.Dir("./web"))))
-mux.Handle("/uploads/", http.StripPrefix("/uploads/", http.FileServer(http.Dir(s.uploadDir))))
+	mux.Handle("/", http.FileServer(http.Dir("./web")))
+	mux.Handle("/uploads/", http.StripPrefix("/uploads/", http.FileServer(http.Dir(s.uploadDir))))
 	mux.HandleFunc("/api/login", s.handleLogin)
 	mux.HandleFunc("/api/logout", s.handleLogout)
 	mux.HandleFunc("/api/ws", s.handleWebSocket)
@@ -75,21 +123,14 @@ mux.Handle("/uploads/", http.StripPrefix("/uploads/", http.FileServer(http.Dir(s
 		return
 	}
 	s.webListener = listener
+	s.webAddr = finalAddr // update with actual bound address
 	defer func() { s.webListener = nil }()
 
 	slog.Info("web ui started", "addr", finalAddr)
-	if err := http.Serve(listener, mux); err != nil {
+	handler := corsMiddleware(mux)
+	if err := http.Serve(listener, handler); err != nil {
 		slog.Error("start web serve err", "error", err)
 	}
-}
-
-func noCache(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
-		w.Header().Set("Pragma", "no-cache")
-		w.Header().Set("Expires", "0")
-		next.ServeHTTP(w, r)
-	})
 }
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
@@ -98,7 +139,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !s.loginLimiter.Allow(r.RemoteAddr) {
+	if !s.loginLimiter.Allow(s.getClientIP(r)) {
 		http.Error(w, "请求过于频繁，请稍后再试", http.StatusTooManyRequests)
 		return
 	}
@@ -107,7 +148,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		Username string `json:"username"`
 		Password string `json:"password"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
+	if err := decodeJSONBody(r, &data); err != nil {
 		http.Error(w, "请求体解析失败", http.StatusBadRequest)
 		return
 	}
@@ -147,17 +188,21 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	var data struct {
 		Token string `json:"token"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
+	if err := decodeJSONBody(r, &data); err != nil {
 		http.Error(w, "请求体解析失败", http.StatusBadRequest)
 		return
 	}
 
-	if strings.TrimSpace(data.Token) == "" {
+	token := data.Token
+	if token == "" {
+		token = getTokenFromRequest(r)
+	}
+	if token == "" {
 		http.Error(w, "token 不能为空", http.StatusBadRequest)
 		return
 	}
 
-	s.DeleteSession(data.Token)
+	s.DeleteSession(token)
 	w.WriteHeader(http.StatusNoContent)
 }
 func (s *Server) handleOnline(w http.ResponseWriter, r *http.Request) {
@@ -172,7 +217,7 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !s.loginLimiter.Allow(r.RemoteAddr) {
+	if !s.sendLimiter.Allow(s.getClientIP(r)) {
 		http.Error(w, "消息发送过于频繁，请稍后再试", http.StatusTooManyRequests)
 		return
 	}
@@ -185,7 +230,7 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 		Mode    string `json:"mode"`
 	}
 
-	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
+	if err := decodeJSONBody(r, &data); err != nil {
 		http.Error(w, "请求体解析失败", http.StatusBadRequest)
 		return
 	}
@@ -250,7 +295,7 @@ func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
 	case http.MethodGet:
 		username := getUserFromContext(r)
 		if username == "" {
-			token := strings.TrimSpace(r.URL.Query().Get("token"))
+			token := getTokenFromRequest(r)
 			if token != "" {
 				var ok bool
 				username, ok = s.GetUsernameByToken(token)
@@ -294,11 +339,14 @@ func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
 			Gender    string `json:"gender"`
 			Signature string `json:"signature"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
+		if err := decodeJSONBody(r, &data); err != nil {
 			http.Error(w, "请求体解析失败", http.StatusBadRequest)
 			return
 		}
 
+		if data.Token == "" {
+			data.Token = getTokenFromRequest(r)
+		}
 		if strings.TrimSpace(data.Token) == "" {
 			http.Error(w, "token 不能为空", http.StatusBadRequest)
 			return
@@ -329,7 +377,7 @@ func (s *Server) handleAvatar(w http.ResponseWriter, r *http.Request) {
 		Token  string `json:"token"`
 		Avatar string `json:"avatar"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
+	if err := decodeJSONBody(r, &data); err != nil {
 		http.Error(w, "请求体解析失败", http.StatusBadRequest)
 		return
 	}
@@ -415,7 +463,7 @@ func (s *Server) handleRename(w http.ResponseWriter, r *http.Request) {
 		Token string `json:"token"`
 		New   string `json:"new"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
+	if err := decodeJSONBody(r, &data); err != nil {
 		http.Error(w, "请求体解析失败", http.StatusBadRequest)
 		return
 	}
@@ -451,7 +499,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !s.loginLimiter.Allow(r.RemoteAddr) {
+	if !s.registerLimiter.Allow(s.getClientIP(r)) {
 		http.Error(w, "请求过于频繁，请稍后再试", http.StatusTooManyRequests)
 		return
 	}
@@ -461,7 +509,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		Password string `json:"password"`
 		Avatar   string `json:"avatar"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
+	if err := decodeJSONBody(r, &data); err != nil {
 		http.Error(w, "请求体解析失败", http.StatusBadRequest)
 		return
 	}
@@ -491,7 +539,7 @@ func (s *Server) handleGroup(w http.ResponseWriter, r *http.Request) {
 		GroupName  string `json:"groupName"`
 		MemberName string `json:"memberName"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
+	if err := decodeJSONBody(r, &data); err != nil {
 		http.Error(w, "请求体解析失败", http.StatusBadRequest)
 		return
 	}
@@ -604,7 +652,7 @@ func (s *Server) handleFriend(w http.ResponseWriter, r *http.Request) {
 		FriendName string `json:"friend"`
 	}
 
-	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
+	if err := decodeJSONBody(r, &data); err != nil {
 		http.Error(w, "无效的请求格式", http.StatusBadRequest)
 		return
 	}
@@ -738,7 +786,8 @@ func listenWithFallback(addr string, maxAttempts int) (net.Listener, string, err
 	var port int
 	fmt.Sscanf(portStr, "%d", &port)
 	if port <= 0 {
-		return nil, "", fmt.Errorf("invalid port in address: %s", addr)
+		ln, err := net.Listen("tcp", addr)
+		return ln, addr, err
 	}
 
 	var lastErr error

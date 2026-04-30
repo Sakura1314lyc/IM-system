@@ -47,7 +47,7 @@ func nowLabelWS() string {
 }
 
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
-	token := strings.TrimSpace(r.URL.Query().Get("token"))
+	token := getTokenFromRequest(r)
 	if token == "" {
 		http.Error(w, "missing token", http.StatusBadRequest)
 		return
@@ -63,12 +63,13 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	s.RemoveWSClient(username)
 
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
-		InsecureSkipVerify: true,
+		OriginPatterns: []string{"*"},
 	})
 	if err != nil {
 		slog.Error("websocket accept error", "error", err)
 		return
 	}
+		conn.SetReadLimit(65536) // 64KB max message
 
 	userInfo, err := s.DB.GetUserByUsername(username)
 	if err != nil {
@@ -89,15 +90,17 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	s.AddWSClient(client)
 	defer s.RemoveWSClient(username)
 
-	// Write goroutine: reads from client.C and writes to WebSocket
+	// Write goroutine: reads from client.C and writes to WebSocket connection
 	go func() {
-		// Send initial system message
-		s.writeWS(client, wsOutgoing{Type: "system", Content: "connected"})
-
+		defer slog.Info("ws write goroutine exited", "name", client.Name)
 		for {
 			select {
 			case msg := <-client.C:
-				s.writeWS(client, wsOutgoing{Type: "message", Content: msg})
+				err := client.Conn.Write(ctx, websocket.MessageText, []byte(msg))
+				if err != nil {
+					slog.Error("ws write error", "error", err)
+					return
+				}
 			case <-ctx.Done():
 				return
 			}
@@ -179,6 +182,7 @@ func (s *Server) writeWS(client *WSClient, msg wsOutgoing) {
 	}
 	select {
 	case client.C <- string(data):
+	case <-client.ctx.Done():
 	default:
 		slog.Warn("ws client buffer full, dropping message", "name", client.Name)
 	}
@@ -196,7 +200,6 @@ func (s *Server) RemoveWSClient(name string) {
 	defer s.wsLock.Unlock()
 	if c, ok := s.WSConns[name]; ok {
 		c.cancel()
-		close(c.C)
 		delete(s.WSConns, name)
 		slog.Info("ws client disconnected", "name", name)
 	}
@@ -208,6 +211,7 @@ func (s *Server) sendWSMessage(msg string) {
 	for _, client := range s.WSConns {
 		select {
 		case client.C <- msg:
+		case <-client.ctx.Done():
 		default:
 		}
 	}
@@ -255,7 +259,8 @@ func (s *Server) SendPrivateWS(from, to, content, avatar string) error {
 	}
 	s.mapLock.RUnlock()
 
-	return fmt.Errorf("user [%s] is offline", to)
+	slog.Info("private message saved for offline user", "from", from, "to", to)
+		return nil
 }
 
 func (s *Server) BroadCastToGroupWS(groupName, from, msg, avatar string) error {

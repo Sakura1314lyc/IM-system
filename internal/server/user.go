@@ -236,37 +236,29 @@ func (u *User) Offline() {
 
 	if u.conn != nil {
 		u.conn.Close()
+		u.conn = nil
 	}
 
-slog.Info("user offline", "name", u.Name)
-
-	defer func() {
-		if r := recover(); r != nil {
-slog.Error("channel close panic", "error", r)
-		}
-	}()
-
-	select {
-	case <-u.C:
-	default:
-	}
-	close(u.C)
+	slog.Info("user offline", "name", u.Name)
 }
 
 func (u *User) ListenMessage() {
 	defer func() {
 		if r := recover(); r != nil {
-slog.Error("listen message panic", "error", r)
+			slog.Error("listen message panic", "error", r)
 		}
 	}()
 
 	for msg := range u.C {
-		if u.conn == nil {
+		u.mu.RLock()
+		conn := u.conn
+		u.mu.RUnlock()
+		if conn == nil {
 			return
 		}
-		_, err := u.conn.Write([]byte(msg + "\n"))
+		_, err := conn.Write([]byte(msg + "\n"))
 		if err != nil {
-slog.Error("listen message write error", "error", err)
+			slog.Error("listen message write error", "error", err)
 			return
 		}
 	}

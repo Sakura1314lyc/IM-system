@@ -36,7 +36,9 @@ type Server struct {
 
 	DB Storage
 
-	loginLimiter *rateLimiter
+	loginLimiter    *rateLimiter
+	registerLimiter *rateLimiter
+	sendLimiter     *rateLimiter
 
 	TLSConfig *tls.Config
 	ctx       context.Context
@@ -53,10 +55,10 @@ type Server struct {
 	webAddr         string
 }
 
-func New(cfg *config.Config) *Server {
+func New(cfg *config.Config) (*Server, error) {
 	database, err := db.InitDatabase(cfg.DB.Path)
 	if err != nil {
-		panic(fmt.Sprintf("Failed to initialize database: %v", err))
+		return nil, fmt.Errorf("failed to initialize database: %w", err)
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -69,6 +71,8 @@ func New(cfg *config.Config) *Server {
 		Message:       make(chan string),
 		DB:            database,
 		loginLimiter:  newRateLimiter(cfg.App.RateLimit, cfg.App.RateWindow.ToDuration()),
+		registerLimiter: newRateLimiter(cfg.App.RateLimit, cfg.App.RateWindow.ToDuration()),
+		sendLimiter:     newRateLimiter(cfg.App.RateLimit, cfg.App.RateWindow.ToDuration()),
 		ctx:           ctx,
 		cancel:        cancel,
 		idleTimeout:   cfg.Server.IdleTimeout.ToDuration(),
@@ -93,7 +97,7 @@ func New(cfg *config.Config) *Server {
 		}
 	}
 
-	return server
+	return server, nil
 }
 
 func (s *Server) Start() {
@@ -153,7 +157,8 @@ func (s *Server) Handler(conn net.Conn) {
 	user := NewUser(conn, s)
 	user.Online()
 
-	isLive := make(chan bool)
+	isLive := make(chan bool, 1)
+	var offlineOnce sync.Once
 
 	go func() {
 		scanner := bufio.NewScanner(conn)
@@ -164,12 +169,15 @@ func (s *Server) Handler(conn net.Conn) {
 			}
 
 			user.DoMessage(msg)
-			isLive <- true
+			select {
+			case isLive <- true:
+			default:
+			}
 		}
 		if err := scanner.Err(); err != nil {
 			slog.Error("handler scanner err", "error", err)
 		}
-		user.Offline()
+		offlineOnce.Do(func() { user.Offline() })
 	}()
 
 	for {
@@ -178,7 +186,7 @@ func (s *Server) Handler(conn net.Conn) {
 		case <-time.After(s.idleTimeout):
 			slog.Info("user idle timeout, kicked", "name", user.Name)
 			user.SendMsg("你已被踢出")
-			user.Offline()
+			offlineOnce.Do(func() { user.Offline() })
 			return
 		}
 	}
@@ -275,6 +283,7 @@ func (s *Server) BroadCastToGroup(groupName, from, msg, avatar string) error {
 		if client, ok := s.WSConns[member.Username]; ok {
 			select {
 			case client.C <- sendMsg:
+			case <-client.ctx.Done():
 			default:
 			}
 		}
@@ -321,7 +330,8 @@ func (s *Server) SendPrivate(from, to, content, avatar string) error {
 	}
 	s.wsLock.RUnlock()
 
-	return fmt.Errorf("目标用户[%s]不在线", to)
+	slog.Info("private message saved for offline user", "from", from, "to", to)
+	return nil
 }
 
 func (s *Server) GetOnlineUsers() []map[string]string {
@@ -391,12 +401,12 @@ func (s *Server) RenameUser(oldName, newName string) bool {
 }
 
 func (s *Server) RenameWSClient(oldName, newName string) error {
-	if s.IsNameTaken(newName) {
-		return fmt.Errorf("用户名已被占用")
-	}
-
 	s.wsLock.Lock()
 	defer s.wsLock.Unlock()
+
+	if _, exists := s.WSConns[newName]; exists {
+		return fmt.Errorf("用户名已被占用")
+	}
 
 	client, ok := s.WSConns[oldName]
 	if !ok {
@@ -419,6 +429,7 @@ func (s *Server) sendToWSConns(message string) {
 	for _, client := range s.WSConns {
 		select {
 		case client.C <- message:
+		case <-client.ctx.Done():
 		default:
 		}
 	}
@@ -494,17 +505,19 @@ func (s *Server) CreateSession(username string) (string, error) {
 }
 
 func (s *Server) GetUsernameByToken(token string) (string, bool) {
-	s.sessionLock.RLock()
-	sess, ok := s.SessionTokens[token]
-	s.sessionLock.RUnlock()
+	s.sessionLock.Lock()
+	defer s.sessionLock.Unlock()
 
+	sess, ok := s.SessionTokens[token]
 	if !ok {
 		return "", false
 	}
 	if sess.IsExpired() {
-		s.DeleteSession(token)
+		delete(s.SessionTokens, token)
 		return "", false
 	}
+	// Refresh expiry on each use
+	sess.ExpiresAt = time.Now().Add(s.sessionTTL)
 	return sess.Username, true
 }
 

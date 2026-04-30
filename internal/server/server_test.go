@@ -15,7 +15,10 @@ func testServer(t *testing.T) *Server {
 	cfg.Web.Addr = ":0"
 	cfg.DB.Path = ":memory:"
 	cfg.Server.TLS = false
-	s := New(cfg)
+	s, err := New(cfg)
+	if err != nil {
+		t.Fatalf("New() failed: %v", err)
+	}
 	return s
 }
 

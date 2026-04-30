@@ -6,7 +6,8 @@
         "idle_timeout": "5m"
     },
     "web": {
-        "addr": ":8080"
+        "addr": ":8080",
+        "upload_dir": "/app/uploads"
     },
     "db": {
         "path": "data/im.db"
