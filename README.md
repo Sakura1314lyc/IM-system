@@ -5,14 +5,19 @@
 ## 项目结构
 
 ```
-├── main.go              # 启动入口（TCP + Web 双服务 + 优雅关闭）
-├── server.go            # 服务端核心（网络层、业务逻辑、REST API、中间件、TLS）
-├── user.go              # 用户模型与 TCP 命令处理
-├── db.go                # SQLite 数据库层（用户、群组、消息、好友）
+├── main.go                  # 启动入口（TCP + Web 双服务 + 优雅关闭）
+├── internal/
+│   ├── model/model.go       # 数据模型（User, Message, Group, Session 等）
+│   ├── db/db.go             # SQLite 数据库层（参数化查询，事务保证）
+│   └── server/
+│       ├── server.go        # 服务端核心（TCP 监听、消息广播、会话管理）
+│       ├── user.go          # 用户模型与 TCP 命令处理
+│       ├── web.go           # REST API、SSE、中间件、TLS 证书
+│       └── ratelimit.go     # 速率限制器
 ├── cmd/
-│   ├── client/main.go   # TCP 命令行客户端
-│   └── web/main.go      # Web 网关代理（可选独立部署）
-└── web/                 # 前端 UI
+│   ├── client/main.go       # TCP 命令行客户端
+│   └── web/main.go          # Web 网关代理（可选独立部署）
+└── web/                     # 前端 UI
     ├── index.html
     ├── styles.css
     └── app.js
@@ -28,6 +33,9 @@
 - ✅ 消息历史持久化（SQLite，支持按类型/私聊/群聊查询）
 - ✅ Web UI 基于 SSE 实时推送，支持头像、个人资料
 - ✅ 认证中间件（减少 handler 重复代码）
+- ✅ 会话 Token 24 小时自动过期 + 后台清理
+- ✅ 登录/注册/消息发送速率限制（基于 IP，每分钟 10 次）
+- ✅ 密码 bcrypt 哈希存储，密码哈希不暴露于 API 响应
 - ✅ 服务端空闲超时踢出（10 分钟无消息）
 - ✅ 输入安全过滤（防 XSS）
 - ✅ 可选 TLS 加密（自动生成 ECDSA 自签名证书）
@@ -116,8 +124,11 @@ login|alice|123456
 
 ## 架构要点
 
+- **分层设计**：`model` → `db` → `server` 三层依赖，无循环引用
 - **并发模型**：每个 TCP 连接一个 goroutine，消息通过 `channel` 分发
 - **认证中间件**：GET 路由统一使用 `authQueryMiddleware`，从 context 取用户身份
+- **会话管理**：Token 24 小时过期，30 分钟轮询清理过期会话
+- **速率限制**：登录/注册/发消息按 IP 限频，防止暴力破解和消息冲刷
 - **数据库**：SQLite，使用参数化查询防 SQL 注入，事务保证好友关系一致性
 - **TLS**：`-tls` 标志启动时自动生成 ECDSA 自签名证书，无需手动配置
 - **优雅关闭**：捕获 SIGINT/SIGTERM，关闭 listener 释放端口

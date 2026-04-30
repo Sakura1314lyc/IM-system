@@ -6,6 +6,8 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+
+	"IM-system/internal/server"
 )
 
 var (
@@ -27,13 +29,10 @@ func init() {
 func main() {
 	flag.Parse()
 
-	server := NewServer(serverIP, serverPort, dbPath, enableTLS)
+	srv := server.New(serverIP, serverPort, dbPath, enableTLS)
 
-	// 后端 TCP IM 服务
-	go server.Start()
-
-	// Web UI + REST/SSE 服务
-	go server.StartWeb(webAddr)
+	go srv.Start()
+	go srv.StartWeb(webAddr)
 
 	fmt.Printf("启动中:TCP %s:%d,Web %s, DB: %s, TLS: %v\n", serverIP, serverPort, webAddr, dbPath, enableTLS)
 
@@ -41,6 +40,6 @@ func main() {
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	<-sigCh
 	fmt.Println("\n正在关闭服务器...")
-	server.Shutdown()
+	srv.Shutdown()
 	fmt.Println("服务器已关闭")
 }

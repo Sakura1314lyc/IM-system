@@ -1,4 +1,4 @@
-package main
+package db
 
 import (
 	"database/sql"
@@ -7,58 +7,14 @@ import (
 	"strings"
 	"time"
 
+	"IM-system/internal/model"
+
 	"github.com/mattn/go-sqlite3"
 	"golang.org/x/crypto/bcrypt"
 )
 
 type Database struct {
 	db *sql.DB
-}
-
-type DBUser struct {
-	ID        int       `json:"id"`
-	Username  string    `json:"username"`
-	Password  string    `json:"password"`
-	Avatar    string    `json:"avatar"`
-	Gender    string    `json:"gender"`
-	Signature string    `json:"signature"`
-	CreatedAt time.Time `json:"created_at"`
-}
-
-type DBGroup struct {
-	ID          int       `json:"id"`
-	Name        string    `json:"name"`
-	CreatorID   int       `json:"creator_id"`
-	Description string    `json:"description"`
-	CreatedAt   time.Time `json:"created_at"`
-}
-
-type DBGroupMember struct {
-	ID      int `json:"id"`
-	GroupID int `json:"group_id"`
-	UserID  int `json:"user_id"`
-}
-
-type DBMessage struct {
-	ID        int       `json:"id"`
-	FromID    int       `json:"from_id"`
-	ToID      *int      `json:"to_id,omitempty"`    // for private messages
-	GroupID   *int      `json:"group_id,omitempty"` // for group messages
-	Content   string    `json:"content"`
-	Type      string    `json:"type"` // "public", "private", "group"
-	CreatedAt time.Time `json:"created_at"`
-}
-
-type DBMessageExt struct {
-	ID        int       `json:"id"`
-	From      string    `json:"from"`
-	Avatar    string    `json:"avatar"`
-	Signature string    `json:"signature"`
-	To        string    `json:"to,omitempty"`
-	Group     string    `json:"group,omitempty"`
-	Content   string    `json:"content"`
-	Type      string    `json:"type"`
-	CreatedAt time.Time `json:"created_at"`
 }
 
 func InitDatabase(dbPath string) (*Database, error) {
@@ -73,12 +29,10 @@ func InitDatabase(dbPath string) (*Database, error) {
 
 	database := &Database{db: db}
 
-	// Create tables
 	if err := database.createTables(); err != nil {
 		return nil, fmt.Errorf("failed to create tables: %v", err)
 	}
 
-	// Create default users
 	if err := database.createDefaultUsers(); err != nil {
 		log.Printf("Warning: failed to create default users: %v", err)
 	}
@@ -87,7 +41,6 @@ func InitDatabase(dbPath string) (*Database, error) {
 }
 
 func (d *Database) createTables() error {
-	// Users table
 	userTable := `
 	CREATE TABLE IF NOT EXISTS users (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -99,7 +52,6 @@ func (d *Database) createTables() error {
 		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
 	);`
 
-	// Groups table
 	groupTable := `
 	CREATE TABLE IF NOT EXISTS groups (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -110,7 +62,6 @@ func (d *Database) createTables() error {
 		FOREIGN KEY (creator_id) REFERENCES users(id)
 	);`
 
-	// Group members table
 	groupMembersTable := `
 	CREATE TABLE IF NOT EXISTS group_members (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -122,7 +73,6 @@ func (d *Database) createTables() error {
 		FOREIGN KEY (user_id) REFERENCES users(id)
 	);`
 
-	// Messages table
 	messagesTable := `
 	CREATE TABLE IF NOT EXISTS messages (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -137,7 +87,6 @@ func (d *Database) createTables() error {
 		FOREIGN KEY (group_id) REFERENCES groups(id)
 	);`
 
-	// Friends table
 	friendsTable := `
 	CREATE TABLE IF NOT EXISTS friends (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -151,14 +100,12 @@ func (d *Database) createTables() error {
 	);`
 
 	tables := []string{userTable, groupTable, groupMembersTable, messagesTable, friendsTable}
-
 	for _, table := range tables {
 		if _, err := d.db.Exec(table); err != nil {
 			return fmt.Errorf("failed to create table: %v", err)
 		}
 	}
 
-	// 兼容升级已有用户表，新增 profile 字段
 	if _, err := d.db.Exec("ALTER TABLE users ADD COLUMN gender TEXT DEFAULT ''"); err != nil {
 		if !strings.Contains(err.Error(), "duplicate column name") {
 			return fmt.Errorf("failed to alter users table gender: %v", err)
@@ -174,13 +121,14 @@ func (d *Database) createTables() error {
 }
 
 func (d *Database) createDefaultUsers() error {
-	defaultUsers := []struct {
+	type defaultUser struct {
 		username  string
 		password  string
 		avatar    string
 		gender    string
 		signature string
-	}{
+	}
+	defaultUsers := []defaultUser{
 		{"alice", "123456", "👨‍💼", "female", "保持微笑，世界温柔。"},
 		{"bob", "123456", "👩‍💼", "male", "代码即诗。"},
 		{"charlie", "123456", "👨‍💻", "male", "永远在终端里历险。"},
@@ -204,8 +152,8 @@ func (d *Database) createDefaultUsers() error {
 	return nil
 }
 
-func (d *Database) AuthenticateUser(username, password string) (*DBUser, error) {
-	var user DBUser
+func (d *Database) AuthenticateUser(username, password string) (*model.DBUser, error) {
+	var user model.DBUser
 	err := d.db.QueryRow(`
 		SELECT id, username, password, avatar, gender, signature, created_at
 		FROM users WHERE username = ?`, username).Scan(
@@ -253,29 +201,12 @@ func (d *Database) RegisterUser(username, password, avatar string) error {
 	return nil
 }
 
-func (d *Database) GetUserByID(id int) (*DBUser, error) {
-	var user DBUser
+func (d *Database) GetUserByUsername(username string) (*model.UserPublic, error) {
+	var user model.UserPublic
 	err := d.db.QueryRow(`
-		SELECT id, username, password, avatar, gender, signature, created_at
-		FROM users WHERE id = ?`, id).Scan(
-		&user.ID, &user.Username, &user.Password, &user.Avatar, &user.Gender, &user.Signature, &user.CreatedAt)
-
-	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("user not found")
-	}
-	if err != nil {
-		return nil, fmt.Errorf("database error: %v", err)
-	}
-
-	return &user, nil
-}
-
-func (d *Database) GetUserByUsername(username string) (*DBUser, error) {
-	var user DBUser
-	err := d.db.QueryRow(`
-		SELECT id, username, password, avatar, gender, signature, created_at
+		SELECT id, username, avatar, gender, signature, created_at
 		FROM users WHERE username = ?`, username).Scan(
-		&user.ID, &user.Username, &user.Password, &user.Avatar, &user.Gender, &user.Signature, &user.CreatedAt)
+		&user.ID, &user.Username, &user.Avatar, &user.Gender, &user.Signature, &user.CreatedAt)
 
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("user not found")
@@ -287,7 +218,7 @@ func (d *Database) GetUserByUsername(username string) (*DBUser, error) {
 	return &user, nil
 }
 
-func (d *Database) CreateGroup(name string, creatorID int, description string) (*DBGroup, error) {
+func (d *Database) CreateGroup(name string, creatorID int, description string) (*model.DBGroup, error) {
 	result, err := d.db.Exec(`
 		INSERT INTO groups (name, creator_id, description)
 		VALUES (?, ?, ?)`,
@@ -305,7 +236,6 @@ func (d *Database) CreateGroup(name string, creatorID int, description string) (
 		return nil, fmt.Errorf("failed to get group id: %v", err)
 	}
 
-	// Add creator as first member
 	_, err = d.db.Exec(`
 		INSERT INTO group_members (group_id, user_id)
 		VALUES (?, ?)`, id, creatorID)
@@ -313,7 +243,7 @@ func (d *Database) CreateGroup(name string, creatorID int, description string) (
 		return nil, fmt.Errorf("failed to add creator to group: %v", err)
 	}
 
-	group := &DBGroup{
+	group := &model.DBGroup{
 		ID:          int(id),
 		Name:        name,
 		CreatorID:   creatorID,
@@ -375,9 +305,9 @@ func (d *Database) LeaveGroup(groupName string, userID int) error {
 	return nil
 }
 
-func (d *Database) GetGroupMembers(groupName string) ([]*DBUser, error) {
+func (d *Database) GetGroupMembers(groupName string) ([]*model.UserPublic, error) {
 	rows, err := d.db.Query(`
-		SELECT u.id, u.username, u.password, u.avatar, u.created_at
+		SELECT u.id, u.username, u.avatar, u.gender, u.signature, u.created_at
 		FROM users u
 		JOIN group_members gm ON u.id = gm.user_id
 		JOIN groups g ON gm.group_id = g.id
@@ -388,10 +318,10 @@ func (d *Database) GetGroupMembers(groupName string) ([]*DBUser, error) {
 	}
 	defer rows.Close()
 
-	var members []*DBUser
+	var members []*model.UserPublic
 	for rows.Next() {
-		var user DBUser
-		err := rows.Scan(&user.ID, &user.Username, &user.Password, &user.Avatar, &user.CreatedAt)
+		var user model.UserPublic
+		err := rows.Scan(&user.ID, &user.Username, &user.Avatar, &user.Gender, &user.Signature, &user.CreatedAt)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan user: %v", err)
 		}
@@ -401,8 +331,8 @@ func (d *Database) GetGroupMembers(groupName string) ([]*DBUser, error) {
 	return members, nil
 }
 
-func (d *Database) GetGroupByName(name string) (*DBGroup, error) {
-	var group DBGroup
+func (d *Database) GetGroupByName(name string) (*model.DBGroup, error) {
+	var group model.DBGroup
 	err := d.db.QueryRow(`
 		SELECT id, name, creator_id, description, created_at
 		FROM groups WHERE name = ?`, name).
@@ -456,7 +386,7 @@ func (d *Database) UpdateUserProfile(username, gender, signature string) error {
 	return nil
 }
 
-func (d *Database) GetPublicMessages(limit int) ([]*DBMessageExt, error) {
+func (d *Database) GetPublicMessages(limit int) ([]*model.DBMessageExt, error) {
 	rows, err := d.db.Query(`
 		SELECT m.id, u.username, u.avatar, u.signature, '', '', m.content, m.type, m.created_at
 		FROM messages m
@@ -469,9 +399,9 @@ func (d *Database) GetPublicMessages(limit int) ([]*DBMessageExt, error) {
 	}
 	defer rows.Close()
 
-	var messages []*DBMessageExt
+	var messages []*model.DBMessageExt
 	for rows.Next() {
-		var msg DBMessageExt
+		var msg model.DBMessageExt
 		if err := rows.Scan(&msg.ID, &msg.From, &msg.Avatar, &msg.Signature, &msg.To, &msg.Group, &msg.Content, &msg.Type, &msg.CreatedAt); err != nil {
 			return nil, fmt.Errorf("failed to scan message: %v", err)
 		}
@@ -481,7 +411,7 @@ func (d *Database) GetPublicMessages(limit int) ([]*DBMessageExt, error) {
 	return messages, nil
 }
 
-func (d *Database) GetGroupMessages(groupName string, limit int) ([]*DBMessageExt, error) {
+func (d *Database) GetGroupMessages(groupName string, limit int) ([]*model.DBMessageExt, error) {
 	rows, err := d.db.Query(`
 		SELECT m.id, u.username, u.avatar, u.signature, '', g.name, m.content, m.type, m.created_at
 		FROM messages m
@@ -495,9 +425,9 @@ func (d *Database) GetGroupMessages(groupName string, limit int) ([]*DBMessageEx
 	}
 	defer rows.Close()
 
-	var messages []*DBMessageExt
+	var messages []*model.DBMessageExt
 	for rows.Next() {
-		var msg DBMessageExt
+		var msg model.DBMessageExt
 		if err := rows.Scan(&msg.ID, &msg.From, &msg.Avatar, &msg.Signature, &msg.To, &msg.Group, &msg.Content, &msg.Type, &msg.CreatedAt); err != nil {
 			return nil, fmt.Errorf("failed to scan message: %v", err)
 		}
@@ -507,7 +437,7 @@ func (d *Database) GetGroupMessages(groupName string, limit int) ([]*DBMessageEx
 	return messages, nil
 }
 
-func (d *Database) GetPrivateMessages(username, peer string, limit int) ([]*DBMessageExt, error) {
+func (d *Database) GetPrivateMessages(username, peer string, limit int) ([]*model.DBMessageExt, error) {
 	rows, err := d.db.Query(`
 		SELECT m.id, u.username, u.avatar, u.signature, u2.username, '', m.content, m.type, m.created_at
 		FROM messages m
@@ -521,9 +451,9 @@ func (d *Database) GetPrivateMessages(username, peer string, limit int) ([]*DBMe
 	}
 	defer rows.Close()
 
-	var messages []*DBMessageExt
+	var messages []*model.DBMessageExt
 	for rows.Next() {
-		var msg DBMessageExt
+		var msg model.DBMessageExt
 		if err := rows.Scan(&msg.ID, &msg.From, &msg.Avatar, &msg.Signature, &msg.To, &msg.Group, &msg.Content, &msg.Type, &msg.CreatedAt); err != nil {
 			return nil, fmt.Errorf("failed to scan message: %v", err)
 		}
@@ -533,7 +463,7 @@ func (d *Database) GetPrivateMessages(username, peer string, limit int) ([]*DBMe
 	return messages, nil
 }
 
-func (d *Database) SaveMessage(fromID int, toID *int, groupID *int, content, msgType string) (*DBMessage, error) {
+func (d *Database) SaveMessage(fromID int, toID *int, groupID *int, content, msgType string) (*model.DBMessage, error) {
 	result, err := d.db.Exec(`
 		INSERT INTO messages (from_id, to_id, group_id, content, type)
 		VALUES (?, ?, ?, ?, ?)`,
@@ -548,7 +478,7 @@ func (d *Database) SaveMessage(fromID int, toID *int, groupID *int, content, msg
 		return nil, fmt.Errorf("failed to get message id: %v", err)
 	}
 
-	message := &DBMessage{
+	message := &model.DBMessage{
 		ID:        int(id),
 		FromID:    fromID,
 		ToID:      toID,
@@ -561,38 +491,12 @@ func (d *Database) SaveMessage(fromID int, toID *int, groupID *int, content, msg
 	return message, nil
 }
 
-func (d *Database) GetMessageHistory(limit int) ([]*DBMessage, error) {
-	rows, err := d.db.Query(`
-		SELECT id, from_id, to_id, group_id, content, type, created_at
-		FROM messages
-		ORDER BY created_at DESC
-		LIMIT ?`, limit)
-
-	if err != nil {
-		return nil, fmt.Errorf("database error: %v", err)
-	}
-	defer rows.Close()
-
-	var messages []*DBMessage
-	for rows.Next() {
-		var msg DBMessage
-		err := rows.Scan(&msg.ID, &msg.FromID, &msg.ToID, &msg.GroupID, &msg.Content, &msg.Type, &msg.CreatedAt)
-		if err != nil {
-			return nil, fmt.Errorf("failed to scan message: %v", err)
-		}
-		messages = append(messages, &msg)
-	}
-
-	return messages, nil
-}
-
 // 加好友（双向关系）
 func (d *Database) AddFriend(userID int, friendID int) error {
 	if userID == friendID {
 		return fmt.Errorf("cannot add yourself as friend")
 	}
 
-	// 检查对方用户是否存在
 	var exists int
 	err := d.db.QueryRow("SELECT id FROM users WHERE id = ?", friendID).Scan(&exists)
 	if err == sql.ErrNoRows {
@@ -602,7 +506,6 @@ func (d *Database) AddFriend(userID int, friendID int) error {
 		return fmt.Errorf("database error: %v", err)
 	}
 
-	// 双向好友关系，使用事务保证原子性
 	tx, err := d.db.Begin()
 	if err != nil {
 		return fmt.Errorf("failed to begin transaction: %v", err)
@@ -651,9 +554,9 @@ func (d *Database) RemoveFriend(userID int, friendID int) error {
 }
 
 // 获取用户的好友列表
-func (d *Database) GetFriends(userID int) ([]*DBUser, error) {
+func (d *Database) GetFriends(userID int) ([]*model.UserPublic, error) {
 	rows, err := d.db.Query(`
-		SELECT u.id, u.username, u.password, u.avatar, u.created_at
+		SELECT u.id, u.username, u.avatar, u.gender, u.signature, u.created_at
 		FROM users u
 		JOIN friends f ON u.id = f.friend_id
 		WHERE f.user_id = ? AND f.status = 'accepted'
@@ -664,10 +567,10 @@ func (d *Database) GetFriends(userID int) ([]*DBUser, error) {
 	}
 	defer rows.Close()
 
-	var friends []*DBUser
+	var friends []*model.UserPublic
 	for rows.Next() {
-		var user DBUser
-		err := rows.Scan(&user.ID, &user.Username, &user.Password, &user.Avatar, &user.CreatedAt)
+		var user model.UserPublic
+		err := rows.Scan(&user.ID, &user.Username, &user.Avatar, &user.Gender, &user.Signature, &user.CreatedAt)
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan user: %v", err)
 		}

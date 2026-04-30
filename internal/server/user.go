@@ -1,4 +1,4 @@
-package main
+package server
 
 import (
 	"fmt"
@@ -14,33 +14,29 @@ type User struct {
 	C               chan string
 	conn            net.Conn
 	IsAuthenticated bool
-	Avatar          string // 用户头像
+	Avatar          string
 	mu              sync.RWMutex
 
 	Server *Server
 }
 
-// 创建用户的API
 func NewUser(conn net.Conn, server *Server) *User {
 	userAddr := conn.RemoteAddr().String()
 	user := &User{
 		Name:   userAddr,
 		Addr:   userAddr,
-		C:      make(chan string, 100), // 容量防止慢客户端阻塞广播
+		C:      make(chan string, 100),
 		conn:   conn,
 		Server: server,
 	}
 
-	//启动监听当前user channel消息的goroutine
 	go user.ListenMessage()
 
 	return user
 }
 
-// 用户上线的业务
 func (u *User) Online() {
 	u.Server.mapLock.Lock()
-	// 清理旧的重复映射（例如先用地址上线，然后登录时会改名）
 	for key, user := range u.Server.OnlineMap {
 		if user == u && key != u.Name {
 			delete(u.Server.OnlineMap, key)
@@ -52,11 +48,9 @@ func (u *User) Online() {
 
 	fmt.Printf("[%s] 用户 %s(%s) 上线\n", time.Now().Format("2006-01-02 15:04:05"), u.Name, u.Addr)
 
-	//广播当前用户上线消息
 	u.Server.BroadCast(u, "已上线")
 }
 
-// 给当前user对应的客户端发送消息
 func (u *User) SendMsg(msg string) {
 	if u.conn == nil {
 		return
@@ -68,7 +62,6 @@ func (u *User) SendMsg(msg string) {
 	}
 }
 
-// 用户处理消息的业务
 func (u *User) DoMessage(msg string) {
 	if !u.IsAuthenticated {
 		if strings.HasPrefix(msg, "login|") {
@@ -117,7 +110,6 @@ func (u *User) DoMessage(msg string) {
 	lower := strings.ToLower(msg)
 
 	if lower == "who" {
-		// 查询当前有哪些在线用户（不包含自己）
 		u.Server.mapLock.RLock()
 		for _, user := range u.Server.OnlineMap {
 			if user.Name == u.Name {
@@ -130,7 +122,6 @@ func (u *User) DoMessage(msg string) {
 		return
 	}
 
-	// 处理 rename 命令 - 注意：修复了前面的逻辑混乱问题
 	if strings.HasPrefix(lower, "rename|") {
 		parts := strings.SplitN(msg, "|", 2)
 		if len(parts) != 2 || strings.TrimSpace(parts[1]) == "" {
@@ -139,7 +130,6 @@ func (u *User) DoMessage(msg string) {
 		}
 
 		newName := strings.TrimSpace(parts[1])
-		// 修复并发问题：检查和修改需要原子化
 		if u.Server.RenameUser(u.Name, newName) {
 			u.mu.Lock()
 			u.Name = newName
@@ -151,7 +141,6 @@ func (u *User) DoMessage(msg string) {
 		return
 	}
 
-	// 处理私聊命令
 	if strings.HasPrefix(lower, "to|") {
 		parts := strings.SplitN(msg, "|", 3)
 		if len(parts) != 3 || strings.TrimSpace(parts[1]) == "" || strings.TrimSpace(parts[2]) == "" {
@@ -171,7 +160,6 @@ func (u *User) DoMessage(msg string) {
 		return
 	}
 
-	// 处理群聊命令
 	if strings.HasPrefix(lower, "group|") {
 		parts := strings.SplitN(msg, "|", 4)
 		if len(parts) < 2 {
@@ -233,7 +221,6 @@ func (u *User) DoMessage(msg string) {
 	u.Server.BroadCast(u, msg)
 }
 
-// 用户下线的业务
 func (u *User) Offline() {
 	u.Server.mapLock.Lock()
 	for key, user := range u.Server.OnlineMap {
@@ -243,7 +230,6 @@ func (u *User) Offline() {
 	}
 	u.Server.mapLock.Unlock()
 
-	// 广播当前用户下线消息
 	u.Server.BroadCast(u, "已下线")
 
 	if u.conn != nil {
@@ -252,14 +238,12 @@ func (u *User) Offline() {
 
 	fmt.Printf("[%s] 用户 %s 离线\n", time.Now().Format("2006-01-02 15:04:05"), u.Name)
 
-	// 安全关闭 channel - 避免在已关闭的 channel 上发送导致 panic
 	defer func() {
 		if r := recover(); r != nil {
 			fmt.Printf("关闭 channel 时发生 panic: %v\n", r)
 		}
 	}()
 
-	// 清空缓冲区
 	select {
 	case <-u.C:
 	default:
@@ -267,7 +251,6 @@ func (u *User) Offline() {
 	close(u.C)
 }
 
-// 监听当前User channel的方法，一旦有消息，就直接发送给对端客户端
 func (u *User) ListenMessage() {
 	defer func() {
 		if r := recover(); r != nil {

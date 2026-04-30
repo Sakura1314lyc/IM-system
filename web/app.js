@@ -623,11 +623,11 @@ function openEvents() {
     addMessage({ text: event.data, system: true });
     refreshOnline().catch(() => {});
   });
-  state.eventSource.onmessage = (event) => {
+  state.eventSource.addEventListener('message', (event) => {
     if (event.data.includes(`[WEB] ${state.username}:`)) return;
     const parsed = parseIncomingSender(event.data);
     addMessage({ text: event.data, avatar: state.selectedPeerAvatar || '🐱', sender: parsed || state.selectedPeer });
-  };
+  });
   state.eventSource.onerror = () => {
     state.eventSource?.close();
     toast('实时连接已断开，请重新登录', 'error');
