@@ -1,0 +1,23 @@
+{
+    "server": {
+        "ip": "127.0.0.1",
+        "port": 0,
+        "tls": false,
+        "idle_timeout": "1s"
+    },
+    "web": {
+        "addr": ":0"
+    },
+    "db": {
+        "path": ":memory:"
+    },
+    "app": {
+        "session_ttl": "5s",
+        "session_cleanup": "1s",
+        "rate_limit": 100,
+        "rate_window": "1m",
+        "max_msg_length": 500,
+        "history_limit": 300,
+        "history_max": 500
+    }
+}

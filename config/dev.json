@@ -1,0 +1,23 @@
+{
+    "server": {
+        "ip": "127.0.0.1",
+        "port": 8888,
+        "tls": false,
+        "idle_timeout": "10m"
+    },
+    "web": {
+        "addr": ":8080"
+    },
+    "db": {
+        "path": "im.db"
+    },
+    "app": {
+        "session_ttl": "24h",
+        "session_cleanup": "30m",
+        "rate_limit": 10,
+        "rate_window": "1m",
+        "max_msg_length": 500,
+        "history_limit": 300,
+        "history_max": 500
+    }
+}

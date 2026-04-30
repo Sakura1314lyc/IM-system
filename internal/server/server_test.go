@@ -4,12 +4,18 @@ import (
 	"testing"
 	"time"
 
+	"IM-system/internal/config"
 	"IM-system/internal/model"
 )
 
 func testServer(t *testing.T) *Server {
 	t.Helper()
-	s := New("127.0.0.1", 0, ":memory:", false)
+	cfg := config.DefaultConfig()
+	cfg.Server.Port = 0
+	cfg.Web.Addr = ":0"
+	cfg.DB.Path = ":memory:"
+	cfg.Server.TLS = false
+	s := New(cfg)
 	return s
 }
 

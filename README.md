@@ -6,7 +6,12 @@
 
 ```
 ├── main.go                  # 启动入口（TCP + Web 双服务 + 优雅关闭）
+├── config/                  # 多环境配置文件
+│   ├── dev.json             #   开发环境（默认）
+│   ├── prod.json            #   生产环境（TLS + 宽松限流）
+│   └── test.json            #   测试环境（内存 DB + 短超时）
 ├── internal/
+│   ├── config/config.go     # 配置管理（JSON + 环境变量覆盖）
 │   ├── model/model.go       # 数据模型（User, Message, Group, Session 等）
 │   ├── db/db.go             # SQLite 数据库层（参数化查询，事务保证）
 │   └── server/
@@ -42,6 +47,7 @@
 - ✅ 端口被占用时自动回退
 - ✅ 优雅关闭（SIGINT/SIGTERM 信号处理）
 - ✅ IPv6 兼容
+- ✅ 多环境配置管理（dev/prod/test JSON + 环境变量覆盖）
 
 ## 环境要求
 
@@ -63,10 +69,41 @@ go run .
 支持参数：
 
 ```bash
-go run . -ip 127.0.0.1 -port 8888 -web :8080 -db im.db -tls
+# 指定运行环境（dev/prod/test），默认 dev
+go run . -env prod
+
+# 环境变量覆盖配置（IM_ 前缀）
+IM_SERVER_PORT=9999 IM_SESSION_TTL=12h go run .
+
+# 传统参数仍可用，会覆盖配置文件对应值
+go run . -ip 127.0.0.1 -port 8888 -tls
 ```
 
 > `-tls` 会自动生成 ECDSA P256 自签名证书用于开发环境，生产环境请使用正规证书。
+
+### 多环境配置
+
+项目使用 `config/{env}.json` 加载配置，加载优先级：**内置默认值 ← 配置文件 ← 环境变量 ← 命令行参数**。
+
+```bash
+go run . -env dev    # 加载 config/dev.json （开发，默认）
+go run . -env prod   # 加载 config/prod.json（生产：TLS 开启、0.0.0.0）
+go run . -env test   # 加载 config/test.json（测试：内存 DB、短超时）
+```
+
+支持的环境变量（`IM_` 前缀）：
+
+| 变量 | 作用 | 示例 |
+|------|------|------|
+| `IM_SERVER_IP` | TCP 监听地址 | `0.0.0.0` |
+| `IM_SERVER_PORT` | TCP 端口 | `8888` |
+| `IM_SERVER_TLS` | 启用 TLS | `true` |
+| `IM_WEB_ADDR` | Web 监听地址 | `:8080` |
+| `IM_DB_PATH` | 数据库路径 | `data/im.db` |
+| `IM_SESSION_TTL` | 会话有效期 | `24h` |
+| `IM_IDLE_TIMEOUT` | 用户超时踢出 | `10m` |
+| `IM_RATE_LIMIT` | 每分钟最大请求数 | `30` |
+| `IM_MAX_MSG_LENGTH` | 消息最大长度 | `2000` |
 
 ### 启动 TCP 客户端
 
@@ -145,6 +182,7 @@ go test ./... -v -count=1 -timeout 60s
 
 | 包 | 文件 | 覆盖内容 |
 |---|---|---|
+| `internal/config` | `config_test.go` | 默认值、Duration JSON 解析、环境变量覆盖、配置文件加载 |
 | `internal/model` | `model_test.go` | Session 过期边界测试、常量验证 |
 | `internal/db` | `db_test.go` | 用户注册/认证、群组 CRUD、消息持久化（公聊/私聊/群聊）、好友系统（双向事务）、个人资料更新、边界值、并发读 |
 | `internal/server` | `ratelimit_test.go` | 限流器正常/超额/窗口重置、不同 key 隔离、并发安全、零限流 |

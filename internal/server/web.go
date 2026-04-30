@@ -48,7 +48,8 @@ func getUserFromContext(r *http.Request) string {
 	return ""
 }
 
-func (s *Server) StartWeb(addr string) {
+func (s *Server) StartWeb() {
+	addr := s.webAddr
 	mux := http.NewServeMux()
 	mux.Handle("/", noCache(http.FileServer(http.Dir("./web"))))
 	mux.HandleFunc("/api/login", s.handleLogin)

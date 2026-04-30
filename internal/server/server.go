@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"IM-system/internal/config"
 	"IM-system/internal/db"
 	"IM-system/internal/model"
 )
@@ -42,31 +43,42 @@ type Server struct {
 
 	tcpListener net.Listener
 	webListener net.Listener
+
+	idleTimeout     time.Duration
+	sessionTTL      time.Duration
+	sessionCleanup  time.Duration
+	maxMsgLength    int
+	webAddr         string
 }
 
-func New(ip string, port int, dbPath string, enableTLS bool) *Server {
-	database, err := db.InitDatabase(dbPath)
+func New(cfg *config.Config) *Server {
+	database, err := db.InitDatabase(cfg.DB.Path)
 	if err != nil {
 		panic(fmt.Sprintf("Failed to initialize database: %v", err))
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	server := &Server{
-		Ip:            ip,
-		Port:          port,
+		Ip:            cfg.Server.IP,
+		Port:          cfg.Server.Port,
 		OnlineMap:     make(map[string]*User),
 		WebClients:    make(map[string]*model.WebClient),
 		SessionTokens: make(map[string]*model.Session),
 		Message:       make(chan string),
 		DB:            database,
-		loginLimiter:  newRateLimiter(10, 1*time.Minute),
+		loginLimiter:  newRateLimiter(cfg.App.RateLimit, cfg.App.RateWindow.ToDuration()),
 		ctx:           ctx,
 		cancel:        cancel,
+		idleTimeout:   cfg.Server.IdleTimeout.ToDuration(),
+		sessionTTL:    cfg.App.SessionTTL.ToDuration(),
+		sessionCleanup: cfg.App.SessionCleanup.ToDuration(),
+		maxMsgLength:  cfg.App.MaxMsgLength,
+		webAddr:       cfg.Web.Addr,
 	}
 
 	go server.cleanupSessions()
 
-	if enableTLS {
+	if cfg.Server.TLS {
 		cert, err := generateSelfSignedCert()
 		if err != nil {
 			fmt.Printf("Warning: Failed to generate TLS certificate: %v\n", err)
@@ -160,7 +172,7 @@ func (s *Server) Handler(conn net.Conn) {
 	for {
 		select {
 		case <-isLive:
-		case <-time.After(time.Minute * 10):
+		case <-time.After(s.idleTimeout):
 			fmt.Printf("[%s] 用户 %s 超时未活动，被踢出\n", time.Now().Format("2006-01-02 15:04:05"), user.Name)
 			user.SendMsg("你已被踢出")
 			user.Offline()
@@ -189,7 +201,7 @@ func (s *Server) ListenMessager() {
 }
 
 func (s *Server) BroadCast(user *User, msg string) {
-	msg = sanitizeInput(msg)
+	msg = sanitizeInputWithLimit(msg, s.maxMsgLength)
 	sendMsg := "[" + user.Addr + "] " + user.Name + ": " + msg
 	fmt.Printf("[%s] Broadcast from %s(%s): %s\n", time.Now().Format("2006-01-02 15:04:05"), user.Name, user.Addr, msg)
 
@@ -205,7 +217,7 @@ func (s *Server) BroadCast(user *User, msg string) {
 }
 
 func (s *Server) BroadCastFromWeb(name string, msg string, avatar string) {
-	msg = sanitizeInput(msg)
+	msg = sanitizeInputWithLimit(msg, s.maxMsgLength)
 	sendMsg := "[WEB] " + name + ": " + msg
 	fmt.Printf("[%s] Broadcast from WEB user %s: %s\n", time.Now().Format("2006-01-02 15:04:05"), name, msg)
 
@@ -219,7 +231,7 @@ func (s *Server) BroadCastFromWeb(name string, msg string, avatar string) {
 }
 
 func (s *Server) BroadCastToGroup(groupName, from, msg, avatar string) error {
-	msg = sanitizeInput(msg)
+	msg = sanitizeInputWithLimit(msg, s.maxMsgLength)
 
 	fromUser, err := s.DB.GetUserByUsername(from)
 	if err != nil {
@@ -269,7 +281,7 @@ func (s *Server) BroadCastToGroup(groupName, from, msg, avatar string) error {
 }
 
 func (s *Server) SendPrivate(from, to, content, avatar string) error {
-	content = sanitizeInput(content)
+	content = sanitizeInputWithLimit(content, s.maxMsgLength)
 
 	fromUser, err := s.DB.GetUserByUsername(from)
 	if err != nil {
@@ -480,7 +492,7 @@ func (s *Server) CreateSession(username string) (string, error) {
 	s.SessionTokens[token] = &model.Session{
 		Username:  username,
 		CreatedAt: now,
-		ExpiresAt: now.Add(model.SessionTTL),
+		ExpiresAt: now.Add(s.sessionTTL),
 	}
 	return token, nil
 }
@@ -515,7 +527,7 @@ func (s *Server) DeleteSession(token string) {
 }
 
 func (s *Server) cleanupSessions() {
-	ticker := time.NewTicker(30 * time.Minute)
+	ticker := time.NewTicker(s.sessionCleanup)
 	defer ticker.Stop()
 	for {
 		select {
@@ -534,10 +546,14 @@ func (s *Server) cleanupSessions() {
 }
 
 func sanitizeInput(input string) string {
+	return sanitizeInputWithLimit(input, 500)
+}
+
+func sanitizeInputWithLimit(input string, maxLen int) string {
 	re := regexp.MustCompile(`<[^>]*>`)
 	input = re.ReplaceAllString(input, "")
-	if len(input) > 500 {
-		input = input[:500] + "..."
+	if len(input) > maxLen {
+		input = input[:maxLen] + "..."
 	}
 	return strings.TrimSpace(input)
 }
