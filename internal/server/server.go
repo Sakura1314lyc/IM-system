@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bufio"
 	"context"
 	"crypto/rand"
 	"crypto/tls"
@@ -140,15 +141,9 @@ func (s *Server) Handler(conn net.Conn) {
 	isLive := make(chan bool)
 
 	go func() {
-		buf := make([]byte, 4096)
-		for {
-			n, err := conn.Read(buf)
-			if n == 0 || err != nil {
-				user.Offline()
-				return
-			}
-
-			msg := strings.TrimSpace(string(buf[:n]))
+		scanner := bufio.NewScanner(conn)
+		for scanner.Scan() {
+			msg := strings.TrimSpace(scanner.Text())
 			if msg == "" {
 				continue
 			}
@@ -156,6 +151,10 @@ func (s *Server) Handler(conn net.Conn) {
 			user.DoMessage(msg)
 			isLive <- true
 		}
+		if err := scanner.Err(); err != nil {
+			fmt.Printf("Handler scanner err: %v\n", err)
+		}
+		user.Offline()
 	}()
 
 	for {

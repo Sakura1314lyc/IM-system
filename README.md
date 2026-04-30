@@ -133,6 +133,31 @@ login|alice|123456
 - **TLS**：`-tls` 标志启动时自动生成 ECDSA 自签名证书，无需手动配置
 - **优雅关闭**：捕获 SIGINT/SIGTERM，关闭 listener 释放端口
 
+## 测试
+
+项目包含 45+ 个单元测试，覆盖 model、db、server 三层，使用 `go test` 直接运行：
+
+```bash
+go test ./... -v -count=1 -timeout 60s
+```
+
+### 测试结构
+
+| 包 | 文件 | 覆盖内容 |
+|---|---|---|
+| `internal/model` | `model_test.go` | Session 过期边界测试、常量验证 |
+| `internal/db` | `db_test.go` | 用户注册/认证、群组 CRUD、消息持久化（公聊/私聊/群聊）、好友系统（双向事务）、个人资料更新、边界值、并发读 |
+| `internal/server` | `ratelimit_test.go` | 限流器正常/超额/窗口重置、不同 key 隔离、并发安全、零限流 |
+| `internal/server` | `server_test.go` | 输入安全过滤（XSS/截断）、会话 Token 全生命周期、在线用户查询、改名、优雅关闭 |
+
+### 测试特点
+
+- **表格驱动测试**：认证、输入过滤等使用数据驱动用例
+- **子测试命名**：所有用例通过 `t.Run()` 命名，可独立运行与定位
+- **内存 SQLite**：数据库测试使用 `:memory:` 模式，互相隔离无污染
+- **并发安全验证**：限流器 goroutine 并发测试、数据库并发读验证
+- **边界值覆盖**：用户名 3/20 字符边界、密码 6 字符边界、Session 纳秒级过期
+
 ## License
 
 MIT
