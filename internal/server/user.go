@@ -51,13 +51,16 @@ slog.Info("user online", "name", u.Name, "addr", u.Addr)
 }
 
 func (u *User) SendMsg(msg string) {
-	if u.conn == nil {
-		return
-	}
-	_, err := u.conn.Write([]byte(msg))
-	if err != nil {
-slog.Error("send msg failed", "error", err)
-		u.Offline()
+	msg = strings.TrimRight(msg, "\n")
+	defer func() {
+		if r := recover(); r != nil {
+			slog.Error("send msg recover", "error", r)
+		}
+	}()
+	select {
+	case u.C <- msg:
+	default:
+		slog.Warn("user send buffer full, dropping message", "name", u.Name)
 	}
 }
 

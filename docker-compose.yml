@@ -1,0 +1,19 @@
+services:
+  im-server:
+    build: .
+    ports:
+      - "8888:8888"
+      - "8080:8080"
+    volumes:
+      - im-data:/app/data
+      - im-uploads:/app/uploads
+    environment:
+      - IM_SERVER_IP=0.0.0.0
+      - IM_WEB_ADDR=:8080
+      - IM_DB_PATH=/app/data/im.db
+      - IM_UPLOAD_DIR=/app/uploads
+    restart: unless-stopped
+
+volumes:
+  im-data:
+  im-uploads:
