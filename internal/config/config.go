@@ -40,7 +40,8 @@ type ServerConfig struct {
 }
 
 type WebConfig struct {
-	Addr string `json:"addr"`
+	Addr      string `json:"addr"`
+	UploadDir string `json:"upload_dir"`
 }
 
 type DBConfig struct {
@@ -74,7 +75,8 @@ func DefaultConfig() *Config {
 			IdleTimeout:  Duration(10 * time.Minute),
 		},
 		Web: WebConfig{
-			Addr: ":8080",
+			Addr:      ":8080",
+			UploadDir: "uploads",
 		},
 		DB: DBConfig{
 			Path: "im.db",
@@ -118,6 +120,7 @@ func applyEnvOverrides(cfg *Config) {
 		"IM_SERVER_TLS":     func() { cfg.Server.TLS = getEnvBool("IM_SERVER_TLS") },
 		"IM_IDLE_TIMEOUT":   func() { cfg.Server.IdleTimeout = parseEnvDuration("IM_IDLE_TIMEOUT") },
 		"IM_WEB_ADDR":       func() { cfg.Web.Addr = getEnv("IM_WEB_ADDR") },
+	"IM_UPLOAD_DIR":	func() { cfg.Web.UploadDir = getEnv("IM_UPLOAD_DIR") },
 		"IM_DB_PATH":        func() { cfg.DB.Path = getEnv("IM_DB_PATH") },
 		"IM_SESSION_TTL":    func() { cfg.App.SessionTTL = parseEnvDuration("IM_SESSION_TTL") },
 		"IM_SESSION_CLEANUP": func() { cfg.App.SessionCleanup = parseEnvDuration("IM_SESSION_CLEANUP") },

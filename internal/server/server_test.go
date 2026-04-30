@@ -256,9 +256,9 @@ func TestIsNameTaken(t *testing.T) {
 	})
 
 	t.Run("name taken by web client", func(t *testing.T) {
-		s.webLock.Lock()
-		s.WebClients["web-user"] = &model.WebClient{Name: "web-user", C: make(chan string, 1)}
-		s.webLock.Unlock()
+		s.wsLock.Lock()
+		s.WSConns["web-user"] = &WSClient{Name: "web-user", C: make(chan string, 1)}
+		s.wsLock.Unlock()
 
 		if !s.IsNameTaken("web-user") {
 			t.Error("expected web-user name to be taken")
@@ -281,9 +281,9 @@ func TestGetOnlineUsers(t *testing.T) {
 		s.OnlineMap["tcp-user"] = &User{Name: "tcp-user", Avatar: "🖥️"}
 		s.mapLock.Unlock()
 
-		s.webLock.Lock()
-		s.WebClients["web-user"] = &model.WebClient{Name: "web-user", Avatar: "🌐", C: make(chan string, 1)}
-		s.webLock.Unlock()
+		s.wsLock.Lock()
+		s.WSConns["web-user"] = &WSClient{Name: "web-user", Avatar: "🌐", C: make(chan string, 1)}
+		s.wsLock.Unlock()
 
 		users := s.GetOnlineUsers()
 		if len(users) != 2 {
@@ -304,15 +304,15 @@ func TestGetOnlineUsers(t *testing.T) {
 	})
 }
 
-func TestRenameWebClient(t *testing.T) {
+func TestRenameWSClient(t *testing.T) {
 	s := testServer(t)
 
-	s.webLock.Lock()
-	s.WebClients["old-name"] = &model.WebClient{Name: "old-name", C: make(chan string, 1)}
-	s.webLock.Unlock()
+	s.wsLock.Lock()
+	s.WSConns["old-name"] = &WSClient{Name: "old-name", C: make(chan string, 1)}
+	s.wsLock.Unlock()
 
 	t.Run("rename web client", func(t *testing.T) {
-		err := s.RenameWebClient("old-name", "new-name")
+		err := s.RenameWSClient("old-name", "new-name")
 		if err != nil {
 			t.Fatalf("expected rename to succeed, got: %v", err)
 		}
@@ -326,7 +326,7 @@ func TestRenameWebClient(t *testing.T) {
 	})
 
 	t.Run("rename non-existent client fails", func(t *testing.T) {
-		err := s.RenameWebClient("non-existent", "whatever")
+		err := s.RenameWSClient("non-existent", "whatever")
 		if err == nil {
 			t.Error("expected error when renaming non-existent client")
 		}

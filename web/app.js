@@ -104,7 +104,8 @@ const state = {
   thoughts: [],
   messages: 0,
   uploadedAvatar: '',
-  eventSource: null
+  ws: null,
+  wsReconnectTimer: null
 };
 
 function escapeHtml(value) {
@@ -114,7 +115,7 @@ function escapeHtml(value) {
 }
 
 function avatarMarkup(avatar, label = '头像') {
-  if (avatar && avatar.startsWith('data:')) return `<img src="${escapeHtml(avatar)}" alt="${label}" />`;
+  if (avatar && (avatar.startsWith('data:') || avatar.startsWith('/uploads/'))) return `<img src="${escapeHtml(avatar)}" alt="${label}" />`;
   return `<span>${escapeHtml(avatar || '🐱')}</span>`;
 }
 
@@ -596,7 +597,7 @@ async function login() {
   [DOM.headerAvatarBtn, DOM.chatAvatarBtn, DOM.profileDialogAvatar].forEach((el) => setAvatar(el, state.avatar));
 
   showApp();
-  openEvents();
+  openWS();
   setMode('public');
   resetMessages('暂无消息', '公共频道会显示真实聊天内容。');
   await Promise.allSettled([refreshOnline(), refreshFriends(), refreshGroups(), loadHistory('public')]);
@@ -616,39 +617,81 @@ async function register() {
   toast('注册成功，可以登录了');
 }
 
-function openEvents() {
-  state.eventSource?.close();
-  state.eventSource = new EventSource(`/api/events?token=${encodeURIComponent(state.token)}`);
-  state.eventSource.addEventListener('system', (event) => {
-    addMessage({ text: event.data, system: true });
-    refreshOnline().catch(() => {});
-  });
-  state.eventSource.addEventListener('message', (event) => {
-    if (event.data.includes(`[WEB] ${state.username}:`)) return;
-    const parsed = parseIncomingSender(event.data);
-    addMessage({ text: event.data, avatar: state.selectedPeerAvatar || '🐱', sender: parsed || state.selectedPeer });
-  });
-  state.eventSource.onerror = () => {
-    state.eventSource?.close();
-    toast('实时连接已断开，请重新登录', 'error');
+function openWS() {
+  state.ws?.close();
+  state.ws = new WebSocket(`ws://${location.host}/api/ws?token=${encodeURIComponent(state.token)}`);
+
+  state.ws.onopen = () => {
+    addMessage({ text: '已连接到服务器', system: true });
+  };
+
+  state.ws.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data);
+      switch (data.type) {
+        case 'message':
+          if (data.mode === 'public' && data.from === state.username) return;
+          const parsed = parseIncomingSender(data.content);
+          addMessage({
+            text: data.content,
+            avatar: state.selectedPeerAvatar || '🐱',
+            sender: parsed || state.selectedPeer,
+            time: data.time
+          });
+          break;
+        case 'system':
+          addMessage({ text: data.content, system: true });
+          refreshOnline().catch(() => {});
+          break;
+        case 'error':
+          toast(data.content, 'error');
+          break;
+        case 'sent':
+          addMessage({
+            text: data.content,
+            type: 'outgoing',
+            avatar: state.avatar,
+            sender: state.username,
+            time: data.time
+          });
+          break;
+      }
+    } catch (_) {
+      // ignore unparseable messages
+    }
+  };
+
+  state.ws.onclose = () => {
+    state.ws = null;
+    toast('实时连接已断开', 'error');
+  };
+
+  state.ws.onerror = () => {
+    state.ws?.close();
   };
 }
 
 async function sendMessage() {
   const text = DOM.messageInput.value.trim();
   if (!text) return;
-  const payload = { token: state.token, name: state.username, message: text, mode: state.mode };
   if (state.mode === 'private') {
-    payload.to = DOM.toUser.value.trim();
-    if (!payload.to) return toast('请选择私聊对象', 'error');
+    const to = DOM.toUser.value.trim();
+    if (!to) return toast('请选择私聊对象', 'error');
+    if (state.ws?.readyState === WebSocket.OPEN) {
+      state.ws.send(JSON.stringify({ type: 'send', mode: 'private', to, message: text }));
+    }
+  } else if (state.mode === 'group') {
+    const to = DOM.toGroup.value.trim();
+    if (!to) return toast('请输入群组名', 'error');
+    if (state.ws?.readyState === WebSocket.OPEN) {
+      state.ws.send(JSON.stringify({ type: 'send', mode: 'group', to, message: text }));
+    }
+  } else {
+    if (state.ws?.readyState === WebSocket.OPEN) {
+      state.ws.send(JSON.stringify({ type: 'send', mode: 'public', message: text }));
+    }
   }
-  if (state.mode === 'group') {
-    payload.to = DOM.toGroup.value.trim();
-    if (!payload.to) return toast('请输入群组名', 'error');
-  }
-  await api('/api/send', { method: 'POST', body: payload });
   DOM.messageInput.value = '';
-  addMessage({ text, type: 'outgoing', avatar: state.avatar, sender: state.username });
 }
 
 function parseIncomingSender(text) {
@@ -663,7 +706,8 @@ function parseIncomingSender(text) {
 }
 
 async function logout() {
-  state.eventSource?.close();
+  state.ws?.close();
+  state.ws = null;
   if (state.token) {
     try { await api('/api/logout', { method: 'POST', body: { token: state.token } }); } catch (_) {}
   }
@@ -756,8 +800,8 @@ async function saveProfile() {
 
 async function saveAvatar() {
   if (!state.uploadedAvatar) return toast('请先选择头像', 'error');
-  await api('/api/avatar', { method: 'POST', body: { token: state.token, avatar: state.uploadedAvatar } });
-  state.avatar = state.uploadedAvatar;
+  const data = await api('/api/avatar', { method: 'POST', body: { token: state.token, avatar: state.uploadedAvatar } });
+  state.avatar = data?.avatar || state.uploadedAvatar;
   state.uploadedAvatar = '';
   [DOM.headerAvatarBtn, DOM.chatAvatarBtn, DOM.profileDialogAvatar].forEach((el) => setAvatar(el, state.avatar));
   DOM.settingsAvatarPreview.innerHTML = '📷';

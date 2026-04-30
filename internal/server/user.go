@@ -1,11 +1,10 @@
 package server
 
 import (
-	"fmt"
 	"net"
 	"strings"
+	"log/slog"
 	"sync"
-	"time"
 )
 
 type User struct {
@@ -46,7 +45,7 @@ func (u *User) Online() {
 	u.Server.OnlineMap[u.Name] = u
 	u.Server.mapLock.Unlock()
 
-	fmt.Printf("[%s] 用户 %s(%s) 上线\n", time.Now().Format("2006-01-02 15:04:05"), u.Name, u.Addr)
+slog.Info("user online", "name", u.Name, "addr", u.Addr)
 
 	u.Server.BroadCast(u, "已上线")
 }
@@ -57,7 +56,7 @@ func (u *User) SendMsg(msg string) {
 	}
 	_, err := u.conn.Write([]byte(msg))
 	if err != nil {
-		fmt.Printf("SendMsg error: %v\n", err)
+slog.Error("send msg failed", "error", err)
 		u.Offline()
 	}
 }
@@ -236,11 +235,11 @@ func (u *User) Offline() {
 		u.conn.Close()
 	}
 
-	fmt.Printf("[%s] 用户 %s 离线\n", time.Now().Format("2006-01-02 15:04:05"), u.Name)
+slog.Info("user offline", "name", u.Name)
 
 	defer func() {
 		if r := recover(); r != nil {
-			fmt.Printf("关闭 channel 时发生 panic: %v\n", r)
+slog.Error("channel close panic", "error", r)
 		}
 	}()
 
@@ -254,7 +253,7 @@ func (u *User) Offline() {
 func (u *User) ListenMessage() {
 	defer func() {
 		if r := recover(); r != nil {
-			fmt.Printf("ListenMessage panic: %v\n", r)
+slog.Error("listen message panic", "error", r)
 		}
 	}()
 
@@ -264,7 +263,7 @@ func (u *User) ListenMessage() {
 		}
 		_, err := u.conn.Write([]byte(msg + "\n"))
 		if err != nil {
-			fmt.Printf("ListenMessage Write error: %v\n", err)
+slog.Error("listen message write error", "error", err)
 			return
 		}
 	}

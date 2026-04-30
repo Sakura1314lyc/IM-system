@@ -13,11 +13,11 @@ import (
 	"math/big"
 	"net"
 	"net/http"
+	"log/slog"
 	"strconv"
 	"strings"
 	"time"
 
-	"IM-system/internal/model"
 )
 
 type ctxKey string
@@ -52,9 +52,10 @@ func (s *Server) StartWeb() {
 	addr := s.webAddr
 	mux := http.NewServeMux()
 	mux.Handle("/", noCache(http.FileServer(http.Dir("./web"))))
+mux.Handle("/uploads/", http.StripPrefix("/uploads/", http.FileServer(http.Dir(s.uploadDir))))
 	mux.HandleFunc("/api/login", s.handleLogin)
 	mux.HandleFunc("/api/logout", s.handleLogout)
-	mux.HandleFunc("/api/events", s.handleEvents)
+	mux.HandleFunc("/api/ws", s.handleWebSocket)
 	mux.HandleFunc("/api/online", s.handleOnline)
 	mux.HandleFunc("/api/send", s.handleSend)
 	mux.HandleFunc("/api/rename", s.handleRename)
@@ -70,15 +71,15 @@ func (s *Server) StartWeb() {
 
 	listener, finalAddr, err := listenWithFallback(addr, 20)
 	if err != nil {
-		fmt.Println("StartWeb err:", err)
+		slog.Error("start web failed", "error", err)
 		return
 	}
 	s.webListener = listener
 	defer func() { s.webListener = nil }()
 
-	fmt.Printf("[%s] Web UI 服务启动 %s\n", time.Now().Format("2006-01-02 15:04:05"), finalAddr)
+	slog.Info("web ui started", "addr", finalAddr)
 	if err := http.Serve(listener, mux); err != nil {
-		fmt.Println("StartWeb serve err:", err)
+		slog.Error("start web serve err", "error", err)
 	}
 }
 
@@ -159,65 +160,6 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	s.DeleteSession(data.Token)
 	w.WriteHeader(http.StatusNoContent)
 }
-
-func (s *Server) handleEvents(w http.ResponseWriter, r *http.Request) {
-	token := r.URL.Query().Get("token")
-	if strings.TrimSpace(token) == "" {
-		http.Error(w, "缺少登录 token", http.StatusBadRequest)
-		return
-	}
-
-	name, ok := s.GetUsernameByToken(token)
-	if !ok {
-		http.Error(w, "认证失败", http.StatusUnauthorized)
-		return
-	}
-
-	userInfo, err := s.DB.GetUserByUsername(name)
-	if err != nil {
-		http.Error(w, "用户信息读取失败", http.StatusUnauthorized)
-		return
-	}
-
-	s.webLock.RLock()
-	_, exists := s.WebClients[name]
-	s.webLock.RUnlock()
-	if exists {
-		s.RemoveWebClient(name)
-	}
-
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-	flusher, ok := w.(http.Flusher)
-	if !ok {
-		http.Error(w, "Streaming unsupported", http.StatusInternalServerError)
-		return
-	}
-
-	client := &model.WebClient{Name: name, C: make(chan string, 100), Avatar: userInfo.Avatar}
-	s.AddWebClient(client)
-	defer s.RemoveWebClient(name)
-
-	fmt.Fprintf(w, "event: system\ndata: %s\n\n", "已连接到服务器")
-	flusher.Flush()
-
-	notify := r.Context().Done()
-
-	for {
-		select {
-		case <-notify:
-			return
-		case msg, ok := <-client.C:
-			if !ok {
-				return
-			}
-			fmt.Fprintf(w, "event: message\ndata: %s\n\n", msg)
-			flusher.Flush()
-		}
-	}
-}
-
 func (s *Server) handleOnline(w http.ResponseWriter, r *http.Request) {
 	users := s.GetOnlineUsers()
 	w.Header().Set("Content-Type", "application/json")
@@ -270,18 +212,18 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 	}
 
 	avatar := ""
-	s.webLock.RLock()
-	if client, ok := s.WebClients[name]; ok {
+	s.wsLock.RLock()
+	if client, ok := s.WSConns[name]; ok {
 		avatar = client.Avatar
 	}
-	s.webLock.RUnlock()
+	s.wsLock.RUnlock()
 
 	if data.Mode == "private" {
 		if err := s.SendPrivate(name, data.To, data.Message, avatar); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		w.WriteHeader(http.StatusNoContent)
+	w.WriteHeader(http.StatusNoContent)
 		return
 	}
 
@@ -290,7 +232,7 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-		w.WriteHeader(http.StatusNoContent)
+	w.WriteHeader(http.StatusNoContent)
 		return
 	}
 
@@ -307,9 +249,26 @@ func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		username := getUserFromContext(r)
+		if username == "" {
+			token := strings.TrimSpace(r.URL.Query().Get("token"))
+			if token != "" {
+				var ok bool
+				username, ok = s.GetUsernameByToken(token)
+				if !ok {
+					http.Error(w, "认证失败", http.StatusUnauthorized)
+					return
+				}
+			}
+		}
+
 		targetUsername := strings.TrimSpace(r.URL.Query().Get("user"))
 		if targetUsername == "" {
 			targetUsername = username
+		}
+
+		if targetUsername == "" {
+			http.Error(w, "缺少登录 token", http.StatusBadRequest)
+			return
 		}
 
 		userInfo, err := s.DB.GetUserByUsername(targetUsername)
@@ -356,7 +315,7 @@ func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		w.WriteHeader(http.StatusNoContent)
+	w.WriteHeader(http.StatusNoContent)
 	}
 }
 
@@ -386,12 +345,14 @@ func (s *Server) handleAvatar(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.UpdateAvatar(username, data.Avatar); err != nil {
+	avatarURL, err := s.UpdateAvatar(username, data.Avatar)
+	if err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
 
-	w.WriteHeader(http.StatusNoContent)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"avatar": avatarURL})
 }
 
 func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
@@ -475,7 +436,7 @@ func (s *Server) handleRename(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.RenameWebClient(username, data.New); err != nil {
+	if err := s.RenameWSClient(username, data.New); err != nil {
 		http.Error(w, err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -786,7 +747,7 @@ func listenWithFallback(addr string, maxAttempts int) (net.Listener, string, err
 		ln, listenErr := net.Listen("tcp", tryAddr)
 		if listenErr == nil {
 			if i > 0 {
-				fmt.Printf("端口 %s 被占用，已自动切换到 %s\n", addr, tryAddr)
+				slog.Warn("port occupied, auto-switched", "from", addr, "to", tryAddr)
 			}
 			return ln, tryAddr, nil
 		}

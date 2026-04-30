@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"net"
+	"log/slog"
 	"regexp"
 	"strings"
 	"sync"
@@ -25,15 +26,15 @@ type Server struct {
 	OnlineMap map[string]*User
 	mapLock   sync.RWMutex
 
-	WebClients map[string]*model.WebClient
-	webLock    sync.RWMutex
+	WSConns map[string]*WSClient
+	wsLock  sync.RWMutex
 
 	SessionTokens map[string]*model.Session
 	sessionLock   sync.RWMutex
 
 	Message chan string
 
-	DB *db.Database
+	DB Storage
 
 	loginLimiter *rateLimiter
 
@@ -48,6 +49,7 @@ type Server struct {
 	sessionTTL      time.Duration
 	sessionCleanup  time.Duration
 	maxMsgLength    int
+	uploadDir		string
 	webAddr         string
 }
 
@@ -62,7 +64,7 @@ func New(cfg *config.Config) *Server {
 		Ip:            cfg.Server.IP,
 		Port:          cfg.Server.Port,
 		OnlineMap:     make(map[string]*User),
-		WebClients:    make(map[string]*model.WebClient),
+		WSConns:       make(map[string]*WSClient),
 		SessionTokens: make(map[string]*model.Session),
 		Message:       make(chan string),
 		DB:            database,
@@ -74,6 +76,7 @@ func New(cfg *config.Config) *Server {
 		sessionCleanup: cfg.App.SessionCleanup.ToDuration(),
 		maxMsgLength:  cfg.App.MaxMsgLength,
 		webAddr:       cfg.Web.Addr,
+		uploadDir:	cfg.Web.UploadDir,
 	}
 
 	go server.cleanupSessions()
@@ -81,12 +84,12 @@ func New(cfg *config.Config) *Server {
 	if cfg.Server.TLS {
 		cert, err := generateSelfSignedCert()
 		if err != nil {
-			fmt.Printf("Warning: Failed to generate TLS certificate: %v\n", err)
+			slog.Warn("failed to generate TLS cert", "error", err)
 		} else {
 			server.TLSConfig = &tls.Config{
 				Certificates: []tls.Certificate{cert},
 			}
-			fmt.Println("TLS encryption enabled")
+			slog.Info("tls enabled")
 		}
 	}
 
@@ -101,10 +104,10 @@ func (s *Server) Start() {
 		listener, err = tls.Listen("tcp", fmt.Sprintf("%s:%d", s.Ip, s.Port), s.TLSConfig)
 		s.tcpListener = listener
 		if err != nil {
-			fmt.Println("TLS net.Listen err:", err)
+			slog.Error("tls listen failed", "error", err)
 			return
 		}
-		fmt.Printf("TLS TCP server listening on %s:%d\n", s.Ip, s.Port)
+		slog.Info("tcp server listening with tls", "addr", fmt.Sprintf("%s:%d", s.Ip, s.Port))
 	} else {
 		var addr string
 		var listenErr error
@@ -112,7 +115,7 @@ func (s *Server) Start() {
 		s.tcpListener = listener
 		err = listenErr
 		if err != nil {
-			fmt.Println("net.Listen err:", err)
+			slog.Error("listen failed", "error", err)
 			return
 		}
 		if _, p, splitErr := net.SplitHostPort(addr); splitErr == nil {
@@ -122,14 +125,14 @@ func (s *Server) Start() {
 				s.Port = parsedPort
 			}
 		}
-		fmt.Printf("TCP server listening on %s\n", addr)
+		slog.Info("tcp server listening", "addr", addr)
 	}
 
 	go s.ListenMessager()
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
-			fmt.Println("listener accept err:", err)
+			slog.Error("accept failed", "error", err)
 			continue
 		}
 		go s.Handler(conn)
@@ -164,7 +167,7 @@ func (s *Server) Handler(conn net.Conn) {
 			isLive <- true
 		}
 		if err := scanner.Err(); err != nil {
-			fmt.Printf("Handler scanner err: %v\n", err)
+			slog.Error("handler scanner err", "error", err)
 		}
 		user.Offline()
 	}()
@@ -173,7 +176,7 @@ func (s *Server) Handler(conn net.Conn) {
 		select {
 		case <-isLive:
 		case <-time.After(s.idleTimeout):
-			fmt.Printf("[%s] 用户 %s 超时未活动，被踢出\n", time.Now().Format("2006-01-02 15:04:05"), user.Name)
+			slog.Info("user idle timeout, kicked", "name", user.Name)
 			user.SendMsg("你已被踢出")
 			user.Offline()
 			return
@@ -184,32 +187,32 @@ func (s *Server) Handler(conn net.Conn) {
 func (s *Server) ListenMessager() {
 	for {
 		msg := <-s.Message
-		fmt.Printf("[%s] 广播消息: %s\n", time.Now().Format("2006-01-02 15:04:05"), msg)
+		slog.Info("broadcast message", "msg", msg)
 
 		s.mapLock.RLock()
 		for _, cli := range s.OnlineMap {
 			select {
 			case cli.C <- msg:
 			default:
-				fmt.Printf("[%s] 用户 %s 消息队列满，已跳过\n", time.Now().Format("2006-01-02 15:04:05"), cli.Name)
+				slog.Warn("user queue full, skipped", "name", cli.Name)
 			}
 		}
 		s.mapLock.RUnlock()
 
-		s.sendToWebClients(msg)
+		s.sendToWSConns(msg)
 	}
 }
 
 func (s *Server) BroadCast(user *User, msg string) {
 	msg = sanitizeInputWithLimit(msg, s.maxMsgLength)
 	sendMsg := "[" + user.Addr + "] " + user.Name + ": " + msg
-	fmt.Printf("[%s] Broadcast from %s(%s): %s\n", time.Now().Format("2006-01-02 15:04:05"), user.Name, user.Addr, msg)
+	slog.Info("broadcast from tcp", "from", user.Name, "addr", user.Addr, "msg", msg)
 
 	fromUser, err := s.DB.GetUserByUsername(user.Name)
 	if err == nil {
 		_, err = s.DB.SaveMessage(fromUser.ID, nil, nil, msg, "public")
 		if err != nil {
-			fmt.Printf("Warning: Failed to save public message: %v\n", err)
+			slog.Warn("failed to save public message", "error", err)
 		}
 	}
 
@@ -219,11 +222,11 @@ func (s *Server) BroadCast(user *User, msg string) {
 func (s *Server) BroadCastFromWeb(name string, msg string, avatar string) {
 	msg = sanitizeInputWithLimit(msg, s.maxMsgLength)
 	sendMsg := "[WEB] " + name + ": " + msg
-	fmt.Printf("[%s] Broadcast from WEB user %s: %s\n", time.Now().Format("2006-01-02 15:04:05"), name, msg)
+	slog.Info("broadcast from web", "from", name, "msg", msg)
 
 	if fromUser, err := s.DB.GetUserByUsername(name); err == nil {
 		if _, err := s.DB.SaveMessage(fromUser.ID, nil, nil, msg, "public"); err != nil {
-			fmt.Printf("Warning: Failed to save web public message: %v\n", err)
+			slog.Warn("failed to save web public message", "error", err)
 		}
 	}
 
@@ -254,11 +257,11 @@ func (s *Server) BroadCastToGroup(groupName, from, msg, avatar string) error {
 	groupID := group.ID
 
 	sendMsg := fmt.Sprintf("[群聊 %s] %s: %s", groupName, from, msg)
-	fmt.Printf("[%s] Group broadcast to %s from %s: %s\n", time.Now().Format("2006-01-02 15:04:05"), groupName, from, msg)
+	slog.Info("group broadcast", "group", groupName, "from", from, "msg", msg)
 
 	_, err = s.DB.SaveMessage(fromUser.ID, nil, &groupID, msg, "group")
 	if err != nil {
-		fmt.Printf("Warning: Failed to save group message: %v\n", err)
+			slog.Warn("failed to save group message", "error", err)
 	}
 
 	for _, member := range members {
@@ -268,14 +271,14 @@ func (s *Server) BroadCastToGroup(groupName, from, msg, avatar string) error {
 		}
 		s.mapLock.RUnlock()
 
-		s.webLock.RLock()
-		if client, ok := s.WebClients[member.Username]; ok {
+		s.wsLock.RLock()
+		if client, ok := s.WSConns[member.Username]; ok {
 			select {
 			case client.C <- sendMsg:
 			default:
 			}
 		}
-		s.webLock.RUnlock()
+		s.wsLock.RUnlock()
 	}
 	return nil
 }
@@ -295,7 +298,7 @@ func (s *Server) SendPrivate(from, to, content, avatar string) error {
 
 	_, err = s.DB.SaveMessage(fromUser.ID, &toUser.ID, nil, content, "private")
 	if err != nil {
-		fmt.Printf("Warning: Failed to save private message: %v\n", err)
+			slog.Warn("failed to save private message", "error", err)
 	}
 
 	s.mapLock.RLock()
@@ -306,17 +309,17 @@ func (s *Server) SendPrivate(from, to, content, avatar string) error {
 	}
 	s.mapLock.RUnlock()
 
-	s.webLock.RLock()
-	if client, ok := s.WebClients[to]; ok {
+	s.wsLock.RLock()
+	if client, ok := s.WSConns[to]; ok {
 		select {
 		case client.C <- "[私聊] " + from + ": " + content:
 		default:
-			fmt.Printf("Warning: web client %s message queue full, skip private message\n", to)
+				slog.Warn("web client queue full, skip private", "to", to)
 		}
-		s.webLock.RUnlock()
+		s.wsLock.RUnlock()
 		return nil
 	}
-	s.webLock.RUnlock()
+	s.wsLock.RUnlock()
 
 	return fmt.Errorf("目标用户[%s]不在线", to)
 }
@@ -337,8 +340,8 @@ func (s *Server) GetOnlineUsers() []map[string]string {
 	}
 	s.mapLock.RUnlock()
 
-	s.webLock.RLock()
-	for name, client := range s.WebClients {
+	s.wsLock.RLock()
+	for name, client := range s.WSConns {
 		if !seen[name] {
 			seen[name] = true
 			users = append(users, map[string]string{
@@ -347,7 +350,7 @@ func (s *Server) GetOnlineUsers() []map[string]string {
 			})
 		}
 	}
-	s.webLock.RUnlock()
+	s.wsLock.RUnlock()
 
 	return users
 }
@@ -361,9 +364,9 @@ func (s *Server) IsNameTaken(name string) bool {
 		return true
 	}
 
-	s.webLock.RLock()
-	_, inWeb := s.WebClients[name]
-	s.webLock.RUnlock()
+	s.wsLock.RLock()
+	_, inWeb := s.WSConns[name]
+	s.wsLock.RUnlock()
 
 	return inWeb
 }
@@ -387,44 +390,33 @@ func (s *Server) RenameUser(oldName, newName string) bool {
 	return true
 }
 
-func (s *Server) RenameWebClient(oldName, newName string) error {
+func (s *Server) RenameWSClient(oldName, newName string) error {
 	if s.IsNameTaken(newName) {
 		return fmt.Errorf("用户名已被占用")
 	}
 
-	s.webLock.Lock()
-	defer s.webLock.Unlock()
+	s.wsLock.Lock()
+	defer s.wsLock.Unlock()
 
-	client, ok := s.WebClients[oldName]
+	client, ok := s.WSConns[oldName]
 	if !ok {
 		return fmt.Errorf("旧用户名不存在")
 	}
 
-	delete(s.WebClients, oldName)
+	delete(s.WSConns, oldName)
 	client.Name = newName
-	s.WebClients[newName] = client
+	s.WSConns[newName] = client
 	return nil
 }
 
-func (s *Server) AddWebClient(client *model.WebClient) {
-	s.webLock.Lock()
-	defer s.webLock.Unlock()
-	s.WebClients[client.Name] = client
-}
-
 func (s *Server) RemoveWebClient(name string) {
-	s.webLock.Lock()
-	defer s.webLock.Unlock()
-	if c, ok := s.WebClients[name]; ok {
-		close(c.C)
-	}
-	delete(s.WebClients, name)
+	s.RemoveWSClient(name)
 }
 
-func (s *Server) sendToWebClients(message string) {
-	s.webLock.RLock()
-	defer s.webLock.RUnlock()
-	for _, client := range s.WebClients {
+func (s *Server) sendToWSConns(message string) {
+	s.wsLock.RLock()
+	defer s.wsLock.RUnlock()
+	for _, client := range s.WSConns {
 		select {
 		case client.C <- message:
 		default:
@@ -444,8 +436,12 @@ func (s *Server) Register(username, password, avatar string) error {
 	return s.DB.RegisterUser(username, password, avatar)
 }
 
-func (s *Server) UpdateAvatar(username, avatar string) error {
-	return s.DB.UpdateUserAvatar(username, avatar)
+func (s *Server) UpdateAvatar(username, avatar string) (string, error) {
+	path, err := saveAvatarFile(s.uploadDir, username, avatar)
+	if err != nil {
+		return "", err
+	}
+	return path, s.DB.UpdateUserAvatar(username, path)
 }
 
 func (s *Server) CreateGroup(groupName, creator string) error {

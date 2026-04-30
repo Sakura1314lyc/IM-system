@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
@@ -22,7 +23,7 @@ func main() {
 
 	cfg, err := config.Load(*env)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "配置加载失败: %v\n", err)
+		slog.Error("config load failed", "error", err)
 		os.Exit(1)
 	}
 
@@ -47,13 +48,18 @@ func main() {
 	go srv.Start()
 	go srv.StartWeb()
 
-	fmt.Printf("启动中 [%s]:TCP %s:%d,Web %s, DB: %s, TLS: %v\n",
-		*env, cfg.Server.IP, cfg.Server.Port, cfg.Web.Addr, cfg.DB.Path, cfg.Server.TLS)
+	slog.Info("starting server",
+		"env", *env,
+		"tcp", fmt.Sprintf("%s:%d", cfg.Server.IP, cfg.Server.Port),
+		"web", cfg.Web.Addr,
+		"db", cfg.DB.Path,
+		"tls", cfg.Server.TLS,
+	)
 
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	<-sigCh
-	fmt.Println("\n正在关闭服务器...")
+	slog.Info("shutting down server")
 	srv.Shutdown()
-	fmt.Println("服务器已关闭")
+	slog.Info("server stopped")
 }
