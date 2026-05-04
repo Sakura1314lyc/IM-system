@@ -75,4 +75,4 @@ func (s *Session) IsExpired() bool {
 	return time.Now().After(s.ExpiresAt)
 }
 
-const SessionTTL = 24 * time.Hour
+

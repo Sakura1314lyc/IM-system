@@ -348,10 +348,10 @@ func TestBroadcastToGroupNoMembers(t *testing.T) {
 func TestSendPrivateOffline(t *testing.T) {
 	s := testServer(t)
 
-	// Alice is in the DB but not online
+	// Alice is in the DB but not online — message saved for offline delivery
 	err := s.SendPrivate("alice", "bob", "hello", "👤")
-	if err == nil {
-		t.Error("expected error when target is offline")
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
 	}
 }
 

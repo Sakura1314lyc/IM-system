@@ -3,7 +3,6 @@ package server
 import (
 	"encoding/base64"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -102,19 +101,4 @@ func cleanupOldAvatars(dir, username string) {
 	}
 }
 
-func copyFile(src, dst string) error {
-	sourceFile, err := os.Open(src)
-	if err != nil {
-		return err
-	}
-	defer sourceFile.Close()
 
-	destFile, err := os.Create(dst)
-	if err != nil {
-		return err
-	}
-	defer destFile.Close()
-
-	_, err = io.Copy(destFile, sourceFile)
-	return err
-}

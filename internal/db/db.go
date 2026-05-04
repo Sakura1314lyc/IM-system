@@ -220,6 +220,12 @@ func (d *Database) GetUserByUsername(username string) (*model.UserPublic, error)
 }
 
 func (d *Database) CreateGroup(name string, creatorID int, description string) (*model.DBGroup, error) {
+	if len(strings.TrimSpace(name)) == 0 {
+		return nil, fmt.Errorf("group name cannot be empty")
+	}
+	if len(name) > 32 {
+		return nil, fmt.Errorf("group name too long (max 32 characters)")
+	}
 	result, err := d.db.Exec(`
 		INSERT INTO groups (name, creator_id, description)
 		VALUES (?, ?, ?)`,

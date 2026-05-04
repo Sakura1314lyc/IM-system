@@ -725,14 +725,12 @@ function openWS() {
   try { state.ws?.close(); } catch (_) {}
   setConnectionStatus(false);
   const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const ws = new WebSocket(`${protocol}//${location.host}/api/ws?token=${encodeURIComponent(state.token)}`);
+  const ws = new WebSocket(`${protocol}//${location.host}/api/ws`);
   state.ws = ws;
 
   ws.onopen = () => {
-    if (state.ws === ws) {
-      setConnectionStatus(true);
-      state.wsRetries = 0;
-    }
+    // Send auth as first message after connection established
+    ws.send(JSON.stringify({ type: 'auth', token: state.token }));
   };
 
   ws.onclose = () => {
@@ -755,6 +753,14 @@ function openWS() {
   ws.onmessage = (event) => {
     try {
       const data = JSON.parse(event.data);
+      // Handle auth response
+      if (data.type === 'auth_ok') {
+        if (state.ws === ws) {
+          setConnectionStatus(true);
+          state.wsRetries = 0;
+        }
+        return;
+      }
       switch (data.type) {
         case 'message':
           if (data.from === state.username) return;

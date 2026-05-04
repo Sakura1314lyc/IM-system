@@ -162,7 +162,7 @@ login|alice|123456
 |------|------|------|
 | POST | `/api/login` | 登录获取 token |
 | POST | `/api/register` | 注册新用户（支持上传头像） |
-| GET | `/api/ws` | WebSocket 实时消息（需 token 参数） |
+| GET | `/api/ws` | WebSocket 实时消息（先建立连接，再发送 JSON 认证） |
 | GET | `/api/online` | 在线用户（无需认证） |
 | POST | `/api/send` | 发送消息（公聊/私聊/群聊） |
 | GET | `/api/history` | 历史消息查询 |
@@ -180,16 +180,18 @@ login|alice|123456
 - **分层设计**：`model` → `db`（实现 `Storage` 接口） → `server` 三层依赖，无循环引用
 - **存储层接口**：`Storage` 接口抽象数据库操作，可替换为不同后端，也便于单元测试 mock
 - **双端用户互通**：TCP 连接和 WebSocket 连接共享 `OnlineMap` / `WSConns`，公聊消息互通
-- **并发模型**：每个 TCP/WebSocket 连接一个 goroutine，消息通过 `channel` 分发，读写分离
+- **并发模型**：每个 TCP/WebSocket 连接一个 goroutine，消息通过有缓冲 channel 分发，读写分离
 - **认证中间件**：GET 路由使用 `authQueryMiddleware` 从 context 取用户身份；所有接口兼容 `Authorization: Bearer` 头部
 - **会话管理**：Token 超时自动过期，定期清理过期会话，每次访问刷新过期时间
 - **速率限制**：登录/注册/发消息按 IP 限频（令牌桶算法），防止暴力破解和消息冲刷
 - **数据库**：SQLite，使用参数化查询防 SQL 注入，事务保证好友关系一致性
 - **日志**：使用 Go 标准库 `log/slog` 结构化日志，支持按环境切换输出格式
 - **头像存储**：图片上传保存为文件，emoji 直接存入数据库，灵活兼容；限制 2MB 大小
-- **WebSocket**：JSON 协议通信，支持公聊、私聊、群聊；具备指数退避自动重连机制
+- **WebSocket**：JSON 协议通信，先建连接再发送 `{type:"auth", token}` 认证，不暴露 token 在 URL；支持公聊、私聊、群聊；具备指数退避自动重连机制
 - **TLS**：`-tls` 标志启动时自动生成 ECDSA 自签名证书，无需手动配置
-- **优雅关闭**：捕获 SIGINT/SIGTERM，10 秒超时等待活跃连接处理完毕
+- **优雅关闭**：捕获 SIGINT/SIGTERM，通过 `sync.WaitGroup` 等待所有 goroutine 退出，15 秒超时强制退出
+- **离线消息**：私聊目标不在线时消息存入数据库，上线后可加载历史记录
+- **群组校验**：群名不能为空且不超过 32 字符
 - **前端 UI**：无框架纯 JavaScript，现代 CSS（玻璃拟态 + 渐变主题），支持深色模式
 
 ## 安全特性

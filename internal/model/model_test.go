@@ -60,7 +60,5 @@ func TestSessionIsExpired(t *testing.T) {
 }
 
 func TestSessionTTLConstant(t *testing.T) {
-	if SessionTTL != 24*time.Hour {
-		t.Errorf("expected SessionTTL to be 24h, got %v", SessionTTL)
-	}
+	// 常量已移除，TTL 现在由配置驱动
 }

@@ -251,12 +251,12 @@ func (u *User) ListenMessage() {
 
 	for msg := range u.C {
 		u.mu.RLock()
-		conn := u.conn
-		u.mu.RUnlock()
-		if conn == nil {
+		if u.conn == nil {
+			u.mu.RUnlock()
 			return
 		}
-		_, err := conn.Write([]byte(msg + "\n"))
+		_, err := u.conn.Write([]byte(msg + "\n"))
+		u.mu.RUnlock()
 		if err != nil {
 			slog.Error("listen message write error", "error", err)
 			return

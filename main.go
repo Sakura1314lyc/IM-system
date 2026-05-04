@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -51,6 +50,7 @@ func main() {
 		return
 	}
 
+	srv.WGAdd(2) // Start + StartWeb
 	go srv.Start()
 	go srv.StartWeb()
 
@@ -68,11 +68,15 @@ func main() {
 	slog.Info("shutting down...", "signal", sig)
 
 	// Graceful shutdown with timeout
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer shutdownCancel()
-
-	srv.Shutdown()
-
-	<-shutdownCtx.Done()
+	done := make(chan struct{})
+	go func() {
+		srv.Shutdown()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(15 * time.Second):
+		slog.Warn("shutdown timed out, forcing exit")
+	}
 	slog.Info("server stopped")
 }

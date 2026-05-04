@@ -97,6 +97,7 @@ func (s *Server) getClientIP(r *http.Request) string {
 }
 
 func (s *Server) StartWeb() {
+	defer s.wg.Done()
 	addr := s.webAddr
 	mux := http.NewServeMux()
 	mux.Handle("/", http.FileServer(http.Dir("./web")))
@@ -268,8 +269,8 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-	w.WriteHeader(http.StatusNoContent)
-		return
+			w.WriteHeader(http.StatusNoContent)
+			return
 	}
 
 	if data.Mode == "group" {
@@ -277,8 +278,8 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-	w.WriteHeader(http.StatusNoContent)
-		return
+			w.WriteHeader(http.StatusNoContent)
+			return
 	}
 
 	s.BroadCastFromWeb(name, data.Message, avatar)
@@ -363,7 +364,7 @@ func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-	w.WriteHeader(http.StatusNoContent)
+			w.WriteHeader(http.StatusNoContent)
 	}
 }
 

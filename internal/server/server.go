@@ -46,6 +46,7 @@ type Server struct {
 
 	tcpListener net.Listener
 	webListener net.Listener
+	wg          sync.WaitGroup
 
 	idleTimeout     time.Duration
 	sessionTTL      time.Duration
@@ -68,7 +69,7 @@ func New(cfg *config.Config) (*Server, error) {
 		OnlineMap:     make(map[string]*User),
 		WSConns:       make(map[string]*WSClient),
 		SessionTokens: make(map[string]*model.Session),
-		Message:       make(chan string),
+		Message:       make(chan string, 100),
 		DB:            database,
 		loginLimiter:  newRateLimiter(cfg.App.RateLimit, cfg.App.RateWindow.ToDuration()),
 		registerLimiter: newRateLimiter(cfg.App.RateLimit, cfg.App.RateWindow.ToDuration()),
@@ -80,9 +81,10 @@ func New(cfg *config.Config) (*Server, error) {
 		sessionCleanup: cfg.App.SessionCleanup.ToDuration(),
 		maxMsgLength:  cfg.App.MaxMsgLength,
 		webAddr:       cfg.Web.Addr,
-		uploadDir:	cfg.Web.UploadDir,
+		uploadDir:      cfg.Web.UploadDir,
 	}
 
+	server.wg.Add(1)
 	go server.cleanupSessions()
 
 	if cfg.Server.TLS {
@@ -101,6 +103,8 @@ func New(cfg *config.Config) (*Server, error) {
 }
 
 func (s *Server) Start() {
+	defer s.wg.Done()
+
 	var listener net.Listener
 	var err error
 
@@ -136,11 +140,21 @@ func (s *Server) Start() {
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
-			slog.Error("accept failed", "error", err)
-			continue
+			select {
+			case <-s.ctx.Done():
+				return
+			default:
+				slog.Error("accept failed", "error", err)
+				continue
+			}
 		}
 		go s.Handler(conn)
 	}
+}
+
+// WGAdd increments the server's WaitGroup counter (safe for external callers).
+func (s *Server) WGAdd(n int) {
+	s.wg.Add(n)
 }
 
 func (s *Server) Shutdown() {
@@ -151,6 +165,7 @@ func (s *Server) Shutdown() {
 	if s.tcpListener != nil {
 		s.tcpListener.Close()
 	}
+	s.wg.Wait()
 }
 
 func (s *Server) Handler(conn net.Conn) {
@@ -193,21 +208,26 @@ func (s *Server) Handler(conn net.Conn) {
 }
 
 func (s *Server) ListenMessager() {
+	defer s.wg.Done()
 	for {
-		msg := <-s.Message
-		slog.Info("broadcast message", "msg", msg)
+		select {
+		case <-s.ctx.Done():
+			return
+		case msg := <-s.Message:
+			slog.Info("broadcast message", "msg", msg)
 
-		s.mapLock.RLock()
-		for _, cli := range s.OnlineMap {
-			select {
-			case cli.C <- msg:
-			default:
-				slog.Warn("user queue full, skipped", "name", cli.Name)
+			s.mapLock.RLock()
+			for _, cli := range s.OnlineMap {
+				select {
+				case cli.C <- msg:
+				default:
+					slog.Warn("user queue full, skipped", "name", cli.Name)
+				}
 			}
-		}
-		s.mapLock.RUnlock()
+			s.mapLock.RUnlock()
 
-		s.sendToWSConns(msg)
+			s.sendToWSConns(msg)
+		}
 	}
 }
 
@@ -536,10 +556,13 @@ func (s *Server) DeleteSession(token string) {
 }
 
 func (s *Server) cleanupSessions() {
+	defer s.wg.Done()
 	ticker := time.NewTicker(s.sessionCleanup)
 	defer ticker.Stop()
 	for {
 		select {
+		case <-s.ctx.Done():
+			return
 		case <-ticker.C:
 			s.sessionLock.Lock()
 			for token, sess := range s.SessionTokens {
@@ -548,8 +571,6 @@ func (s *Server) cleanupSessions() {
 				}
 			}
 			s.sessionLock.Unlock()
-		case <-s.ctx.Done():
-			return
 		}
 	}
 }

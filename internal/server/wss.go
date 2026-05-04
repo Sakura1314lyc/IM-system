@@ -47,21 +47,6 @@ func nowLabelWS() string {
 }
 
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
-	token := getTokenFromRequest(r)
-	if token == "" {
-		http.Error(w, "missing token", http.StatusBadRequest)
-		return
-	}
-
-	username, ok := s.GetUsernameByToken(token)
-	if !ok {
-		http.Error(w, "auth failed", http.StatusUnauthorized)
-		return
-	}
-
-	// Remove any existing connection for this user
-	s.RemoveWSClient(username)
-
 	conn, err := websocket.Accept(w, r, &websocket.AcceptOptions{
 		OriginPatterns: []string{"*"},
 	})
@@ -69,7 +54,32 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		slog.Error("websocket accept error", "error", err)
 		return
 	}
-		conn.SetReadLimit(65536) // 64KB max message
+	conn.SetReadLimit(65536) // 64KB max message
+
+	// First message must be auth
+	_, msgBytes, err := conn.Read(context.Background())
+	if err != nil {
+		conn.Close(websocket.StatusPolicyViolation, "auth required")
+		return
+	}
+
+	var authMsg struct {
+		Type  string `json:"type"`
+		Token string `json:"token"`
+	}
+	if err := json.Unmarshal(msgBytes, &authMsg); err != nil || authMsg.Type != "auth" || authMsg.Token == "" {
+		conn.Close(websocket.StatusPolicyViolation, "invalid auth")
+		return
+	}
+
+	username, ok := s.GetUsernameByToken(authMsg.Token)
+	if !ok {
+		conn.Close(websocket.StatusPolicyViolation, "auth failed")
+		return
+	}
+
+	// Remove any existing connection for this user
+	s.RemoveWSClient(username)
 
 	userInfo, err := s.DB.GetUserByUsername(username)
 	if err != nil {
@@ -86,6 +96,10 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		ctx:    ctx,
 		cancel: cancel,
 	}
+
+		// Confirm auth to client
+	authResp, _ := json.Marshal(wsOutgoing{Type: "auth_ok"})
+	conn.Write(ctx, websocket.MessageText, authResp)
 
 	s.AddWSClient(client)
 	defer s.RemoveWSClient(username)

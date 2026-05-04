@@ -93,15 +93,10 @@ func TestRateLimiter(t *testing.T) {
 		}
 	})
 
-	t.Run("zero limit allows first then blocks", func(t *testing.T) {
+	t.Run("zero limit blocks all requests", func(t *testing.T) {
 		rl := newRateLimiter(0, time.Minute)
-		// First request always creates entry and returns true
-		if !rl.Allow("zero-key") {
-			t.Error("expected first request to be allowed (creates entry)")
-		}
-		// Second request: count becomes 1, limit is 0 → blocked
 		if rl.Allow("zero-key") {
-			t.Error("expected second request to be blocked with zero limit")
+			t.Error("expected request to be blocked with zero limit")
 		}
 	})
 }

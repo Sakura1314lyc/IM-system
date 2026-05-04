@@ -2,6 +2,8 @@ im.db
 test.db
 *.db
 IM-system.exe
+*.exe~
+server.exe
 .gocache/
 tmp-*.exe
 node_modules/
