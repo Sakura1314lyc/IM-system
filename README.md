@@ -235,3 +235,17 @@ go test ./... -v -count=1 -timeout 60s
 ## License
 
 MIT
+
+## 更新日志
+
+### 2026-05-04
+
+- **修复**：`BroadCastFromWeb()` 缺少 WebSocket 客户端消息推送，HTTP API 发送的公聊消息现在会正确转发给所有 WebSocket 客户端
+- **修复**：Dockerfile 增加 `-env prod` 参数，确保生产环境加载正确配置
+- **修复**：TLS 证书生成失败时返回错误而非静默降级为明文
+- **修复**：速率限制器过期条目清理从"每 100 次触发"改为每次新键插入时清理，防止内存泄漏
+- **修复**：TCP 与 WebSocket 群聊/私聊的锁模式简化，消除重复的 `RUnlock` 分支
+- **修复**：TCP 客户端消息前缀统一，Web 端发消息不再带 `[WEB]` 前缀
+- **清理**：移除废弃的 `sendWSMessage()` 函数、空测试函数、重复的 `ALTER TABLE` 迁移代码
+- **优化**：`gofmt -w` 统一全项目代码格式
+- **优化**：添加 `Storage.Close()` 接口和 `Database.Close()` 方法，服务关闭时正确释放数据库资源

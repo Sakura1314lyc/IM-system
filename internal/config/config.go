@@ -33,10 +33,10 @@ func (d Duration) MarshalJSON() ([]byte, error) {
 func (d Duration) ToDuration() time.Duration { return time.Duration(d) }
 
 type ServerConfig struct {
-	IP           string   `json:"ip"`
-	Port         int      `json:"port"`
-	TLS          bool     `json:"tls"`
-	IdleTimeout  Duration `json:"idle_timeout"`
+	IP          string   `json:"ip"`
+	Port        int      `json:"port"`
+	TLS         bool     `json:"tls"`
+	IdleTimeout Duration `json:"idle_timeout"`
 }
 
 type WebConfig struct {
@@ -49,13 +49,13 @@ type DBConfig struct {
 }
 
 type AppConfig struct {
-	SessionTTL      Duration `json:"session_ttl"`
-	SessionCleanup  Duration `json:"session_cleanup"`
-	RateLimit       int      `json:"rate_limit"`
-	RateWindow      Duration `json:"rate_window"`
-	MaxMsgLength    int      `json:"max_msg_length"`
-	HistoryLimit    int      `json:"history_limit"`
-	HistoryMax      int      `json:"history_max"`
+	SessionTTL     Duration `json:"session_ttl"`
+	SessionCleanup Duration `json:"session_cleanup"`
+	RateLimit      int      `json:"rate_limit"`
+	RateWindow     Duration `json:"rate_window"`
+	MaxMsgLength   int      `json:"max_msg_length"`
+	HistoryLimit   int      `json:"history_limit"`
+	HistoryMax     int      `json:"history_max"`
 }
 
 type Config struct {
@@ -69,10 +69,10 @@ type Config struct {
 func DefaultConfig() *Config {
 	return &Config{
 		Server: ServerConfig{
-			IP:           "127.0.0.1",
-			Port:         8888,
-			TLS:          false,
-			IdleTimeout:  Duration(10 * time.Minute),
+			IP:          "127.0.0.1",
+			Port:        8888,
+			TLS:         false,
+			IdleTimeout: Duration(10 * time.Minute),
 		},
 		Web: WebConfig{
 			Addr:      ":8080",
@@ -115,20 +115,20 @@ func Load(env string) (*Config, error) {
 // applyEnvOverrides reads IM_* environment variables and overrides config fields.
 func applyEnvOverrides(cfg *Config) {
 	overrides := map[string]func(){
-		"IM_SERVER_IP":      func() { cfg.Server.IP = getEnv("IM_SERVER_IP") },
-		"IM_SERVER_PORT":    func() { cfg.Server.Port = getEnvInt("IM_SERVER_PORT") },
-		"IM_SERVER_TLS":     func() { cfg.Server.TLS = getEnvBool("IM_SERVER_TLS") },
+		"IM_SERVER_IP":           func() { cfg.Server.IP = getEnv("IM_SERVER_IP") },
+		"IM_SERVER_PORT":         func() { cfg.Server.Port = getEnvInt("IM_SERVER_PORT") },
+		"IM_SERVER_TLS":          func() { cfg.Server.TLS = getEnvBool("IM_SERVER_TLS") },
 		"IM_SERVER_IDLE_TIMEOUT": func() { cfg.Server.IdleTimeout = parseEnvDuration("IM_SERVER_IDLE_TIMEOUT") },
-		"IM_WEB_ADDR":       func() { cfg.Web.Addr = getEnv("IM_WEB_ADDR") },
-	"IM_UPLOAD_DIR":	func() { cfg.Web.UploadDir = getEnv("IM_UPLOAD_DIR") },
-		"IM_DB_PATH":        func() { cfg.DB.Path = getEnv("IM_DB_PATH") },
-		"IM_SESSION_TTL":    func() { cfg.App.SessionTTL = parseEnvDuration("IM_SESSION_TTL") },
-		"IM_SESSION_CLEANUP": func() { cfg.App.SessionCleanup = parseEnvDuration("IM_SESSION_CLEANUP") },
-		"IM_RATE_LIMIT":     func() { cfg.App.RateLimit = getEnvInt("IM_RATE_LIMIT") },
-		"IM_RATE_WINDOW":    func() { cfg.App.RateWindow = parseEnvDuration("IM_RATE_WINDOW") },
-		"IM_MAX_MSG_LENGTH": func() { cfg.App.MaxMsgLength = getEnvInt("IM_MAX_MSG_LENGTH") },
-		"IM_HISTORY_LIMIT":  func() { cfg.App.HistoryLimit = getEnvInt("IM_HISTORY_LIMIT") },
-		"IM_HISTORY_MAX":    func() { cfg.App.HistoryMax = getEnvInt("IM_HISTORY_MAX") },
+		"IM_WEB_ADDR":            func() { cfg.Web.Addr = getEnv("IM_WEB_ADDR") },
+		"IM_UPLOAD_DIR":          func() { cfg.Web.UploadDir = getEnv("IM_UPLOAD_DIR") },
+		"IM_DB_PATH":             func() { cfg.DB.Path = getEnv("IM_DB_PATH") },
+		"IM_SESSION_TTL":         func() { cfg.App.SessionTTL = parseEnvDuration("IM_SESSION_TTL") },
+		"IM_SESSION_CLEANUP":     func() { cfg.App.SessionCleanup = parseEnvDuration("IM_SESSION_CLEANUP") },
+		"IM_RATE_LIMIT":          func() { cfg.App.RateLimit = getEnvInt("IM_RATE_LIMIT") },
+		"IM_RATE_WINDOW":         func() { cfg.App.RateWindow = parseEnvDuration("IM_RATE_WINDOW") },
+		"IM_MAX_MSG_LENGTH":      func() { cfg.App.MaxMsgLength = getEnvInt("IM_MAX_MSG_LENGTH") },
+		"IM_HISTORY_LIMIT":       func() { cfg.App.HistoryLimit = getEnvInt("IM_HISTORY_LIMIT") },
+		"IM_HISTORY_MAX":         func() { cfg.App.HistoryMax = getEnvInt("IM_HISTORY_MAX") },
 	}
 
 	for envName, apply := range overrides {

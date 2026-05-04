@@ -10,14 +10,13 @@ import (
 	"crypto/x509/pkix"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"math/big"
 	"net"
 	"net/http"
-	"log/slog"
 	"strconv"
 	"strings"
 	"time"
-
 )
 
 type ctxKey string
@@ -63,8 +62,8 @@ func getTokenFromRequest(r *http.Request) string {
 	return strings.TrimSpace(r.URL.Query().Get("token"))
 }
 
-func decodeJSONBody(r *http.Request, dst interface{}) error {
-	r.Body = http.MaxBytesReader(nil, r.Body, 1<<20) // 1MB
+func decodeJSONBody(w http.ResponseWriter, r *http.Request, dst any) error {
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1MB
 	return json.NewDecoder(r.Body).Decode(dst)
 }
 
@@ -110,6 +109,8 @@ func (s *Server) StartWeb() {
 	mux.HandleFunc("/api/rename", s.handleRename)
 	mux.HandleFunc("/api/register", s.handleRegister)
 	mux.HandleFunc("/api/avatar", s.handleAvatar)
+	mux.HandleFunc("/api/lchat/meta", s.handleLchatMeta)
+	mux.HandleFunc("/api/stickers", s.handleStickers)
 	mux.HandleFunc("/api/group", s.handleGroup)
 	mux.HandleFunc("/api/groups", s.authQueryMiddleware(s.handleGroups))
 	mux.HandleFunc("/api/profile", s.handleProfile)
@@ -149,7 +150,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		Username string `json:"username"`
 		Password string `json:"password"`
 	}
-	if err := decodeJSONBody(r, &data); err != nil {
+	if err := decodeJSONBody(w, r, &data); err != nil {
 		http.Error(w, "请求体解析失败", http.StatusBadRequest)
 		return
 	}
@@ -189,7 +190,7 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	var data struct {
 		Token string `json:"token"`
 	}
-	if err := decodeJSONBody(r, &data); err != nil {
+	if err := decodeJSONBody(w, r, &data); err != nil {
 		http.Error(w, "请求体解析失败", http.StatusBadRequest)
 		return
 	}
@@ -206,10 +207,11 @@ func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
 	s.DeleteSession(token)
 	w.WriteHeader(http.StatusNoContent)
 }
+
 func (s *Server) handleOnline(w http.ResponseWriter, r *http.Request) {
 	users := s.GetOnlineUsers()
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"online": users})
+	json.NewEncoder(w).Encode(map[string]any{"online": users})
 }
 
 func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
@@ -231,7 +233,7 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 		Mode    string `json:"mode"`
 	}
 
-	if err := decodeJSONBody(r, &data); err != nil {
+	if err := decodeJSONBody(w, r, &data); err != nil {
 		http.Error(w, "请求体解析失败", http.StatusBadRequest)
 		return
 	}
@@ -269,8 +271,8 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-			w.WriteHeader(http.StatusNoContent)
-			return
+		w.WriteHeader(http.StatusNoContent)
+		return
 	}
 
 	if data.Mode == "group" {
@@ -278,8 +280,8 @@ func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-			w.WriteHeader(http.StatusNoContent)
-			return
+		w.WriteHeader(http.StatusNoContent)
+		return
 	}
 
 	s.BroadCastFromWeb(name, data.Message, avatar)
@@ -297,13 +299,15 @@ func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
 		username := getUserFromContext(r)
 		if username == "" {
 			token := getTokenFromRequest(r)
-			if token != "" {
-				var ok bool
-				username, ok = s.GetUsernameByToken(token)
-				if !ok {
-					http.Error(w, "认证失败", http.StatusUnauthorized)
-					return
-				}
+			if token == "" {
+				http.Error(w, "缺少登录 token", http.StatusBadRequest)
+				return
+			}
+			var ok bool
+			username, ok = s.GetUsernameByToken(token)
+			if !ok {
+				http.Error(w, "认证失败", http.StatusUnauthorized)
+				return
 			}
 		}
 
@@ -324,7 +328,7 @@ func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{
+		json.NewEncoder(w).Encode(map[string]any{
 			"username":  userInfo.Username,
 			"avatar":    userInfo.Avatar,
 			"gender":    userInfo.Gender,
@@ -340,7 +344,7 @@ func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
 			Gender    string `json:"gender"`
 			Signature string `json:"signature"`
 		}
-		if err := decodeJSONBody(r, &data); err != nil {
+		if err := decodeJSONBody(w, r, &data); err != nil {
 			http.Error(w, "请求体解析失败", http.StatusBadRequest)
 			return
 		}
@@ -364,7 +368,7 @@ func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-			w.WriteHeader(http.StatusNoContent)
+		w.WriteHeader(http.StatusNoContent)
 	}
 }
 
@@ -378,7 +382,7 @@ func (s *Server) handleAvatar(w http.ResponseWriter, r *http.Request) {
 		Token  string `json:"token"`
 		Avatar string `json:"avatar"`
 	}
-	if err := decodeJSONBody(r, &data); err != nil {
+	if err := decodeJSONBody(w, r, &data); err != nil {
 		http.Error(w, "请求体解析失败", http.StatusBadRequest)
 		return
 	}
@@ -414,17 +418,14 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 
 	typeResp := r.URL.Query().Get("type")
 	groupName := r.URL.Query().Get("group")
-	limit := 300
+	limit := s.historyLimit
 	if rawLimit := strings.TrimSpace(r.URL.Query().Get("limit")); rawLimit != "" {
 		if parsedLimit, parseErr := strconv.Atoi(rawLimit); parseErr == nil && parsedLimit > 0 {
-			limit = parsedLimit
-			if limit > 500 {
-				limit = 500
-			}
+			limit = min(parsedLimit, s.historyMax)
 		}
 	}
 
-	var history interface{}
+	var history any
 	var err error
 
 	switch typeResp {
@@ -451,7 +452,7 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"history": history})
+	json.NewEncoder(w).Encode(map[string]any{"history": history})
 }
 
 func (s *Server) handleRename(w http.ResponseWriter, r *http.Request) {
@@ -464,7 +465,7 @@ func (s *Server) handleRename(w http.ResponseWriter, r *http.Request) {
 		Token string `json:"token"`
 		New   string `json:"new"`
 	}
-	if err := decodeJSONBody(r, &data); err != nil {
+	if err := decodeJSONBody(w, r, &data); err != nil {
 		http.Error(w, "请求体解析失败", http.StatusBadRequest)
 		return
 	}
@@ -510,7 +511,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		Password string `json:"password"`
 		Avatar   string `json:"avatar"`
 	}
-	if err := decodeJSONBody(r, &data); err != nil {
+	if err := decodeJSONBody(w, r, &data); err != nil {
 		http.Error(w, "请求体解析失败", http.StatusBadRequest)
 		return
 	}
@@ -540,7 +541,7 @@ func (s *Server) handleGroup(w http.ResponseWriter, r *http.Request) {
 		GroupName  string `json:"groupName"`
 		MemberName string `json:"memberName"`
 	}
-	if err := decodeJSONBody(r, &data); err != nil {
+	if err := decodeJSONBody(w, r, &data); err != nil {
 		http.Error(w, "请求体解析失败", http.StatusBadRequest)
 		return
 	}
@@ -638,7 +639,7 @@ func (s *Server) handleGroups(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"groups": groups})
+	json.NewEncoder(w).Encode(map[string]any{"groups": groups})
 }
 
 func (s *Server) handleFriend(w http.ResponseWriter, r *http.Request) {
@@ -653,7 +654,7 @@ func (s *Server) handleFriend(w http.ResponseWriter, r *http.Request) {
 		FriendName string `json:"friend"`
 	}
 
-	if err := decodeJSONBody(r, &data); err != nil {
+	if err := decodeJSONBody(w, r, &data); err != nil {
 		http.Error(w, "无效的请求格式", http.StatusBadRequest)
 		return
 	}
@@ -703,7 +704,7 @@ func (s *Server) handleFriend(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
+	json.NewEncoder(w).Encode(map[string]any{"success": true})
 }
 
 func (s *Server) handleFriends(w http.ResponseWriter, r *http.Request) {
@@ -726,16 +727,16 @@ func (s *Server) handleFriends(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var friendList []map[string]interface{}
+	var friendList []map[string]any
 	for _, f := range friends {
-		friendList = append(friendList, map[string]interface{}{
+		friendList = append(friendList, map[string]any{
 			"name":   f.Username,
 			"avatar": f.Avatar,
 		})
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"friends": friendList})
+	json.NewEncoder(w).Encode(map[string]any{"friends": friendList})
 }
 
 func (s *Server) handleCheckFriend(w http.ResponseWriter, r *http.Request) {
@@ -771,7 +772,7 @@ func (s *Server) handleCheckFriend(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"isFriend": isFriend})
+	json.NewEncoder(w).Encode(map[string]any{"isFriend": isFriend})
 }
 
 func listenWithFallback(addr string, maxAttempts int) (net.Listener, string, error) {

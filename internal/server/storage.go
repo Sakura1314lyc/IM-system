@@ -26,4 +26,6 @@ type Storage interface {
 	RemoveFriend(userID, friendID int) error
 	GetFriends(userID int) ([]*model.UserPublic, error)
 	IsFriend(userID, friendID int) (bool, error)
+
+	Close() error
 }

@@ -1,9 +1,9 @@
 package server
 
 import (
+	"log/slog"
 	"net"
 	"strings"
-	"log/slog"
 	"sync"
 )
 
@@ -45,7 +45,7 @@ func (u *User) Online() {
 	u.Server.OnlineMap[u.Name] = u
 	u.Server.mapLock.Unlock()
 
-slog.Info("user online", "name", u.Name, "addr", u.Addr)
+	slog.Info("user online", "name", u.Name, "addr", u.Addr)
 
 	u.Server.BroadCast(u, "已上线")
 }
@@ -238,6 +238,12 @@ func (u *User) Offline() {
 		u.conn.Close()
 		u.conn = nil
 	}
+
+	// Drain and close the message channel to unblock ListenMessage goroutine
+	for len(u.C) > 0 {
+		<-u.C
+	}
+	close(u.C)
 
 	slog.Info("user offline", "name", u.Name)
 }

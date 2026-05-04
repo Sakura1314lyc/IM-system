@@ -28,4 +28,4 @@ ENV IM_WEB_ADDR=:8080
 ENV IM_DB_PATH=/app/data/im.db
 ENV IM_UPLOAD_DIR=/app/uploads
 
-CMD ["./im-server"]
+CMD ["./im-server", "-env", "prod"]

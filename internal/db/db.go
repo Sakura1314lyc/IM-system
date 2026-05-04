@@ -107,18 +107,11 @@ func (d *Database) createTables() error {
 		}
 	}
 
-	if _, err := d.db.Exec("ALTER TABLE users ADD COLUMN gender TEXT DEFAULT ''"); err != nil {
-		if !strings.Contains(err.Error(), "duplicate column name") {
-			return fmt.Errorf("failed to alter users table gender: %v", err)
-		}
-	}
-	if _, err := d.db.Exec("ALTER TABLE users ADD COLUMN signature TEXT DEFAULT ''"); err != nil {
-		if !strings.Contains(err.Error(), "duplicate column name") {
-			return fmt.Errorf("failed to alter users table signature: %v", err)
-		}
-	}
-
 	return nil
+}
+
+func (d *Database) Close() error {
+	return d.db.Close()
 }
 
 func (d *Database) createDefaultUsers() error {
@@ -193,7 +186,8 @@ func (d *Database) RegisterUser(username, password, avatar string) error {
 		username, string(hashedPassword), avatar)
 
 	if err != nil {
-		var sqliteErr sqlite3.Error; if errors.As(err, &sqliteErr) && sqliteErr.ExtendedCode == sqlite3.ErrConstraintUnique {
+		var sqliteErr sqlite3.Error
+		if errors.As(err, &sqliteErr) && sqliteErr.ExtendedCode == sqlite3.ErrConstraintUnique {
 			return fmt.Errorf("username already exists")
 		}
 		return fmt.Errorf("failed to register user: %v", err)
@@ -232,7 +226,8 @@ func (d *Database) CreateGroup(name string, creatorID int, description string) (
 		name, creatorID, description)
 
 	if err != nil {
-		var sqliteErr sqlite3.Error; if errors.As(err, &sqliteErr) && sqliteErr.ExtendedCode == sqlite3.ErrConstraintUnique {
+		var sqliteErr sqlite3.Error
+		if errors.As(err, &sqliteErr) && sqliteErr.ExtendedCode == sqlite3.ErrConstraintUnique {
 			return nil, fmt.Errorf("group name already exists")
 		}
 		return nil, fmt.Errorf("failed to create group: %v", err)
@@ -504,8 +499,17 @@ func (d *Database) AddFriend(userID int, friendID int) error {
 		return fmt.Errorf("cannot add yourself as friend")
 	}
 
+	// Verify both users exist
 	var exists int
-	err := d.db.QueryRow("SELECT id FROM users WHERE id = ?", friendID).Scan(&exists)
+	err := d.db.QueryRow("SELECT id FROM users WHERE id = ?", userID).Scan(&exists)
+	if err == sql.ErrNoRows {
+		return fmt.Errorf("user not found")
+	}
+	if err != nil {
+		return fmt.Errorf("database error: %v", err)
+	}
+
+	err = d.db.QueryRow("SELECT id FROM users WHERE id = ?", friendID).Scan(&exists)
 	if err == sql.ErrNoRows {
 		return fmt.Errorf("friend not found")
 	}

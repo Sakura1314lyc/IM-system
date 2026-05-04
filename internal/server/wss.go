@@ -4,9 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
-	"log/slog"
 	"sync"
 	"time"
 
@@ -97,7 +97,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		cancel: cancel,
 	}
 
-		// Confirm auth to client
+	// Confirm auth to client
 	authResp, _ := json.Marshal(wsOutgoing{Type: "auth_ok"})
 	conn.Write(ctx, websocket.MessageText, authResp)
 
@@ -219,18 +219,6 @@ func (s *Server) RemoveWSClient(name string) {
 	}
 }
 
-func (s *Server) sendWSMessage(msg string) {
-	s.wsLock.RLock()
-	defer s.wsLock.RUnlock()
-	for _, client := range s.WSConns {
-		select {
-		case client.C <- msg:
-		case <-client.ctx.Done():
-		default:
-		}
-	}
-}
-
 func (s *Server) SendPrivateWS(from, to, content, avatar string) error {
 	fromUser, err := s.DB.GetUserByUsername(from)
 	if err != nil {
@@ -249,7 +237,9 @@ func (s *Server) SendPrivateWS(from, to, content, avatar string) error {
 
 	// Try WebSocket delivery
 	s.wsLock.RLock()
-	if client, ok := s.WSConns[to]; ok {
+	client, ok := s.WSConns[to]
+	s.wsLock.RUnlock()
+	if ok {
 		s.writeWS(client, wsOutgoing{
 			Type:    "message",
 			Mode:    "private",
@@ -259,22 +249,20 @@ func (s *Server) SendPrivateWS(from, to, content, avatar string) error {
 			Content: content,
 			Time:    nowLabelWS(),
 		})
-		s.wsLock.RUnlock()
 		return nil
 	}
-	s.wsLock.RUnlock()
 
 	// Try TCP delivery
 	s.mapLock.RLock()
-	if user, ok := s.OnlineMap[to]; ok {
+	user, ok := s.OnlineMap[to]
+	s.mapLock.RUnlock()
+	if ok {
 		user.SendMsg("[priv] " + from + ": " + content + "\n")
-		s.mapLock.RUnlock()
 		return nil
 	}
-	s.mapLock.RUnlock()
 
 	slog.Info("private message saved for offline user", "from", from, "to", to)
-		return nil
+	return nil
 }
 
 func (s *Server) BroadCastToGroupWS(groupName, from, msg, avatar string) error {
@@ -342,7 +330,11 @@ func (s *Server) BroadCastFromWS(name string, msg string, avatar string) {
 
 	// Send to TCP clients via Message channel
 	tcpMsg := "[WEB] " + sendMsg
-	s.Message <- tcpMsg
+	select {
+	case s.Message <- tcpMsg:
+	default:
+		slog.Warn("message channel full, dropping ws broadcast", "from", name)
+	}
 
 	// Send to all WS clients
 	outgoing := wsOutgoing{

@@ -3,6 +3,7 @@ package server
 import (
 	"encoding/base64"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -21,14 +22,10 @@ func saveAvatarFile(uploadDir, username, avatarData string) (string, error) {
 		return avatarData, nil
 	}
 
-	// Parse data URI: data:image/png;base64,iVBOR...
-	commaIdx := strings.Index(avatarData, ",")
-	if commaIdx < 0 {
+	mimePart, base64Data, ok := strings.Cut(avatarData, ",")
+	if !ok {
 		return "", fmt.Errorf("invalid data URI")
 	}
-
-	mimePart := avatarData[:commaIdx]
-	base64Data := avatarData[commaIdx+1:]
 
 	// Determine extension from MIME type
 	var ext string
@@ -88,17 +85,26 @@ func saveAvatarFile(uploadDir, username, avatarData string) (string, error) {
 func cleanupOldAvatars(dir, username string) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
+		slog.Warn("failed to read avatar dir for cleanup", "dir", dir, "error", err)
 		return
 	}
+	// Apply same sanitization as saveAvatarFile so dots in usernames match
+	safePrefix := strings.Map(func(r rune) rune {
+		if r == '/' || r == '\\' || r == ':' || r == '.' {
+			return '_'
+		}
+		return r
+	}, username)
+
 	for _, entry := range entries {
 		if entry.IsDir() {
 			continue
 		}
 		name := entry.Name()
-		if strings.HasPrefix(name, username+".") || strings.HasPrefix(name, username+"_") {
-			os.Remove(filepath.Join(dir, name))
+		if strings.HasPrefix(name, safePrefix+".") || strings.HasPrefix(name, safePrefix+"_") {
+			if err := os.Remove(filepath.Join(dir, name)); err != nil {
+				slog.Warn("failed to remove old avatar", "file", name, "error", err)
+			}
 		}
 	}
 }
-
-

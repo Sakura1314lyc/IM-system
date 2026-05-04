@@ -31,12 +31,6 @@ type DBGroup struct {
 	CreatedAt   time.Time `json:"created_at"`
 }
 
-type DBGroupMember struct {
-	ID      int `json:"id"`
-	GroupID int `json:"group_id"`
-	UserID  int `json:"user_id"`
-}
-
 type DBMessage struct {
 	ID        int       `json:"id"`
 	FromID    int       `json:"from_id"`
@@ -59,12 +53,6 @@ type DBMessageExt struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-type WebClient struct {
-	Name   string
-	C      chan string
-	Avatar string
-}
-
 type Session struct {
 	Username  string
 	CreatedAt time.Time
@@ -74,5 +62,3 @@ type Session struct {
 func (s *Session) IsExpired() bool {
 	return time.Now().After(s.ExpiresAt)
 }
-
-

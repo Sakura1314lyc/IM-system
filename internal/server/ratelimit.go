@@ -36,12 +36,9 @@ func (rl *rateLimiter) Allow(key string) bool {
 	now := time.Now()
 	entry, ok := rl.counters[key]
 	if !ok || now.After(entry.reset) {
-		// Cleanup expired entries periodically
-		if len(rl.counters) > 1000 && len(rl.counters)%100 == 0 {
-			for k, e := range rl.counters {
-				if now.After(e.reset) {
-					delete(rl.counters, k)
-				}
+		for k, e := range rl.counters {
+			if now.After(e.reset) {
+				delete(rl.counters, k)
 			}
 		}
 		rl.counters[key] = &rateEntry{count: 1, reset: now.Add(rl.window)}

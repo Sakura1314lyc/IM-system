@@ -58,7 +58,3 @@ func TestSessionIsExpired(t *testing.T) {
 		}
 	})
 }
-
-func TestSessionTTLConstant(t *testing.T) {
-	// 常量已移除，TTL 现在由配置驱动
-}

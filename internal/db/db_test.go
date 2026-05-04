@@ -2,7 +2,6 @@ package db
 
 import (
 	"testing"
-
 )
 
 func setupDB(t *testing.T) *Database {

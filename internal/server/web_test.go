@@ -37,11 +37,11 @@ func (m *mockStorage) addGroupMember(groupName string, user *model.UserPublic) {
 
 func (m *mockStorage) addUser(username, password string) {
 	m.users[username] = &model.DBUser{
-		ID:       len(m.users) + 1,
-		Username: username,
-		Password: "$2a$10$" + password,
-		Avatar:   "🐱",
-		Gender:   "male",
+		ID:        len(m.users) + 1,
+		Username:  username,
+		Password:  "$2a$10$" + password,
+		Avatar:    "🐱",
+		Gender:    "male",
 		Signature: "hello",
 		CreatedAt: time.Now(),
 	}
@@ -188,6 +188,8 @@ func (m *mockStorage) IsFriend(userID, friendID int) (bool, error) {
 	return m.friends[userID][friendID], nil
 }
 
+func (m *mockStorage) Close() error { return nil }
+
 // testHTTPServer creates a Server with mock storage and httptest server for testing HTTP handlers.
 type testHTTPHarness struct {
 	server *Server
@@ -205,24 +207,24 @@ func newTestHTTPHarness(t *testing.T) *testHTTPHarness {
 	mock.addUser("bob", "pass456")
 
 	s := &Server{
-		Ip:            "127.0.0.1",
-		Port:          0,
-		OnlineMap:     make(map[string]*User),
-		WSConns:       make(map[string]*WSClient),
-		SessionTokens: make(map[string]*model.Session),
-		Message:       make(chan string, 100),
-		DB:            mock,
+		Ip:              "127.0.0.1",
+		Port:            0,
+		OnlineMap:       make(map[string]*User),
+		WSConns:         make(map[string]*WSClient),
+		SessionTokens:   make(map[string]*model.Session),
+		Message:         make(chan string, 100),
+		DB:              mock,
 		loginLimiter:    newRateLimiter(100, time.Minute),
 		registerLimiter: newRateLimiter(100, time.Minute),
 		sendLimiter:     newRateLimiter(100, time.Minute),
 		ctx:             nil,
 		cancel:          nil,
 		idleTimeout:     time.Minute,
-		sessionTTL:    time.Hour,
-		sessionCleanup: time.Hour,
-		maxMsgLength:  500,
-		webAddr:       ":0",
-		uploadDir:     "uploads",
+		sessionTTL:      time.Hour,
+		sessionCleanup:  time.Hour,
+		maxMsgLength:    500,
+		webAddr:         ":0",
+		uploadDir:       "uploads",
 	}
 
 	// Use a real mux for testing
@@ -232,6 +234,8 @@ func newTestHTTPHarness(t *testing.T) *testHTTPHarness {
 	mux.HandleFunc("/api/online", s.handleOnline)
 	mux.HandleFunc("/api/register", s.handleRegister)
 	mux.HandleFunc("/api/avatar", s.handleAvatar)
+	mux.HandleFunc("/api/lchat/meta", s.handleLchatMeta)
+	mux.HandleFunc("/api/stickers", s.handleStickers)
 	mux.HandleFunc("/api/profile", s.handleProfile)
 	mux.HandleFunc("/api/rename", s.handleRename)
 	mux.HandleFunc("/api/history", s.authQueryMiddleware(s.handleHistory))
@@ -371,12 +375,10 @@ func TestHandleOnline(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("failed to decode: %v", err)
 	}
-	online, ok := resp["online"].([]interface{})
-	if !ok {
+	if _, ok := resp["online"].([]interface{}); !ok {
 		// It might be empty array
 		t.Logf("online response: %v", resp)
 	}
-	_ = online
 }
 
 func TestHandleLogout(t *testing.T) {
@@ -593,6 +595,37 @@ func TestHandleGroupsList(t *testing.T) {
 			t.Errorf("expected 200, got %d: %s", w.Code, w.Body.String())
 		}
 	})
+}
+
+func TestHandleStickers(t *testing.T) {
+	h := newTestHTTPHarness(t)
+	defer h.close()
+
+	w := h.get("/api/stickers")
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Packs []struct {
+			ID    string `json:"id"`
+			Name  string `json:"name"`
+			Items []struct {
+				ID    string `json:"id"`
+				Label string `json:"label"`
+				URL   string `json:"url"`
+			} `json:"items"`
+		} `json:"packs"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("invalid json: %v", err)
+	}
+	if len(resp.Packs) == 0 || len(resp.Packs[0].Items) < 6 {
+		t.Fatalf("expected populated sticker pack, got %+v", resp.Packs)
+	}
+	if resp.Packs[0].Items[0].ID == "" || resp.Packs[0].Items[0].URL == "" {
+		t.Fatalf("expected sticker id and url, got %+v", resp.Packs[0].Items[0])
+	}
 }
 
 func TestHandleSend(t *testing.T) {

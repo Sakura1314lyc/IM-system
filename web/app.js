@@ -98,22 +98,29 @@ const DOM = {
   statMessages: $('statMessages'),
   statGroups: $('statGroups'),
   toastHost: $('toastHost'),
-  topicTags: $('topicTags')
+  topicTags: $('topicTags'),
+  stickerPackName: $('stickerPackName'),
+  stickerPackTabs: $('stickerPackTabs'),
+  stickerGrid: $('stickerGrid'),
+  sideStickerPreview: $('sideStickerPreview')
 };
 
 const state = {
   token: '',
   username: '',
-  avatar: '🐱',
+  avatar: 'L',
   gender: '',
   signature: '',
   mode: 'public',
   selectedPeer: '',
-  selectedPeerAvatar: '🐱',
+  selectedPeerAvatar: 'L',
   groups: [],
   friends: [],
   onlineUsers: [],
   thoughts: [],
+  stickerPacks: [],
+  stickerMap: new Map(),
+  activeStickerPack: '',
   messages: 0,
   uploadedAvatar: '',
   ws: null,
@@ -126,13 +133,107 @@ function escapeHtml(value) {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
+function fallbackInitial(value = '') {
+  const normalized = String(value || '').trim();
+  if (!normalized) return 'L';
+  const first = Array.from(normalized)[0] || 'L';
+  return /[a-z0-9]/i.test(first) ? first.toUpperCase() : 'L';
+}
+
 function avatarMarkup(avatar, label = '头像') {
   if (avatar && (avatar.startsWith('data:') || avatar.startsWith('/uploads/'))) return `<img src="${escapeHtml(avatar)}" alt="${label}" />`;
-  return `<span>${escapeHtml(avatar || '🐱')}</span>`;
+  return `<span>${escapeHtml(fallbackInitial(label))}</span>`;
 }
 
 function setAvatar(el, avatar) {
   if (el) el.innerHTML = avatarMarkup(avatar);
+}
+
+const STICKER_PREFIX = '[LCHAT_STICKER:';
+const STICKER_SUFFIX = ']';
+
+function serializeSticker(stickerId) {
+  return `${STICKER_PREFIX}${stickerId}${STICKER_SUFFIX}`;
+}
+
+function parseSticker(content) {
+  const text = String(content || '').trim();
+  if (!text.startsWith(STICKER_PREFIX) || !text.endsWith(STICKER_SUFFIX)) return null;
+  const id = text.slice(STICKER_PREFIX.length, -STICKER_SUFFIX.length);
+  return state.stickerMap.get(id) || null;
+}
+
+function renderMessageContent(content) {
+  const sticker = parseSticker(content);
+  if (!sticker) return `<p>${escapeHtml(content)}</p>`;
+  return `
+    <figure class="sticker-message">
+      <img src="${escapeHtml(sticker.url)}" alt="${escapeHtml(sticker.label)}" />
+      <figcaption>${escapeHtml(sticker.label)}</figcaption>
+    </figure>
+  `;
+}
+
+function rebuildStickerMap() {
+  state.stickerMap = new Map();
+  state.stickerPacks.forEach((pack) => {
+    (pack.items || []).forEach((item) => state.stickerMap.set(item.id, item));
+  });
+}
+
+function renderStickerPicker() {
+  if (!DOM.stickerGrid || !DOM.stickerPackTabs) return;
+  const packs = state.stickerPacks || [];
+  const activePack = packs.find((pack) => pack.id === state.activeStickerPack) || packs[0];
+  DOM.stickerPackTabs.innerHTML = '';
+  DOM.stickerGrid.innerHTML = '';
+  if (!activePack) {
+    DOM.stickerPackName.textContent = '暂无贴图';
+    DOM.stickerGrid.innerHTML = '<span class="sticker-empty">贴图库暂时为空</span>';
+    return;
+  }
+
+  state.activeStickerPack = activePack.id;
+  DOM.stickerPackName.textContent = activePack.name;
+  packs.forEach((pack) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = pack.id === activePack.id ? 'active' : '';
+    btn.textContent = pack.name;
+    btn.addEventListener('click', () => {
+      state.activeStickerPack = pack.id;
+      renderStickerPicker();
+    });
+    DOM.stickerPackTabs.appendChild(btn);
+  });
+
+  (activePack.items || []).forEach((item) => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'sticker-btn';
+    btn.title = item.label;
+    btn.dataset.stickerId = item.id;
+    btn.innerHTML = `<img src="${escapeHtml(item.url)}" alt="${escapeHtml(item.label)}" /><span>${escapeHtml(item.label)}</span>`;
+    DOM.stickerGrid.appendChild(btn);
+  });
+
+  if (DOM.sideStickerPreview) {
+    DOM.sideStickerPreview.innerHTML = (activePack.items || []).slice(0, 4).map((item) => (
+      `<button type="button" data-sticker-id="${escapeHtml(item.id)}" title="${escapeHtml(item.label)}"><img src="${escapeHtml(item.url)}" alt="${escapeHtml(item.label)}" /></button>`
+    )).join('');
+  }
+}
+
+async function loadStickers() {
+  try {
+    const data = await api('/api/stickers');
+    state.stickerPacks = data.packs || [];
+    rebuildStickerMap();
+    renderStickerPicker();
+  } catch (err) {
+    console.warn('load stickers failed', err);
+    if (DOM.stickerGrid) DOM.stickerGrid.innerHTML = '<span class="sticker-empty">贴图加载失败</span>';
+  }
 }
 
 function toast(message, type = 'info') {
@@ -155,7 +256,11 @@ async function api(endpoint, options = {}) {
     if (state.token) {
       headers['Authorization'] = 'Bearer ' + state.token;
     }
-    const body = options.body ? JSON.stringify(options.body) : undefined;
+    let payload = options.body;
+    if (payload && state.token && typeof payload === 'object' && !Array.isArray(payload) && !payload.token) {
+      payload = { ...payload, token: state.token };
+    }
+    const body = payload ? JSON.stringify(payload) : undefined;
     const response = await fetch(endpoint, {
       ...options,
       body,
@@ -252,10 +357,12 @@ function addMessage({ text, type = 'incoming', avatar = '', time = nowLabel(), s
   const row = document.createElement('div');
   row.className = `message-row ${type}`;
   const profileTarget = sender || (type === 'outgoing' ? state.username : state.selectedPeer);
+  const showSender = sender && type !== 'outgoing';
   row.innerHTML = `
-    <button class="mini-avatar" type="button" title="查看资料">${avatarMarkup(avatar)}</button>
+    <button class="mini-avatar" type="button" title="查看资料">${avatarMarkup(avatar, profileTarget)}</button>
     <article class="bubble">
-      <p>${escapeHtml(text)}</p>
+      ${showSender ? `<strong class="bubble-sender">${escapeHtml(sender)}</strong>` : ''}
+      ${renderMessageContent(text)}
       <time>${escapeHtml(time)}</time>
     </article>
   `;
@@ -294,13 +401,13 @@ function setMode(nextMode) {
   DOM.privateRow.style.display = nextMode === 'private' ? 'flex' : 'none';
   DOM.groupRow.style.display = nextMode === 'group' ? 'flex' : 'none';
   DOM.targetBar.classList.toggle('visible', nextMode !== 'public');
-  if (nextMode === 'public') setAvatar(DOM.chatAvatarBtn, '🐾');
+  if (nextMode === 'public') setAvatar(DOM.chatAvatarBtn, 'L');
   updateChatTitle();
 }
 
 function selectPeer(name, avatar) {
   state.selectedPeer = name;
-  state.selectedPeerAvatar = avatar || '🐱';
+  state.selectedPeerAvatar = avatar || name;
   DOM.toUser.value = name;
   setMode('private');
   setAvatar(DOM.chatAvatarBtn, state.selectedPeerAvatar);
@@ -557,7 +664,7 @@ function renderThoughts() {
 
   items.forEach((thought) => {
     const friend = friendMap.get(thought.author);
-    const avatar = thought.author === state.username ? state.avatar : (friend?.avatar || thought.avatar || '🐱');
+    const avatar = thought.author === state.username ? state.avatar : (friend?.avatar || thought.avatar || thought.author);
     const liked = (thought.likedBy || []).includes(state.username);
     const li = document.createElement('li');
     li.className = 'thought-card';
@@ -668,11 +775,10 @@ async function loadHistory(type = state.mode, target = '') {
   DOM.messageList.querySelector('.empty-state')?.remove();
   history.reverse().forEach((item) => {
     const mine = item.from === state.username;
-    const prefix = item.type === 'group' ? `[${item.group}] ${item.from}: ` : item.type === 'private' ? `${item.from}: ` : `${item.from}: `;
     addMessage({
-      text: `${prefix}${item.content}`,
+      text: item.content,
       type: mine ? 'outgoing' : 'incoming',
-      avatar: mine ? state.avatar : (item.avatar || state.selectedPeerAvatar || '🐱'),
+      avatar: mine ? state.avatar : (item.avatar || state.selectedPeerAvatar || item.from),
       time: nowLabel(item.created_at),
       sender: item.from
     });
@@ -688,14 +794,14 @@ async function login() {
   if (!data || !data.token) throw new Error('登录响应异常，缺少 token');
   state.token = data.token;
   state.username = username;
-  state.avatar = data.avatar || '🐱';
-  state.signature = data.signature || '把简单的事情做漂亮 🌸';
+  state.avatar = data.avatar || username;
+  state.signature = data.signature || '把简单的事情做漂亮。';
   state.gender = data.gender || '';
 
   DOM.userNameDisplay.textContent = username;
   DOM.userStatus.textContent = '在线';
   DOM.profileUsername.textContent = `@${username}`;
-  DOM.profileSignature.textContent = state.signature || '把简单的事情做漂亮 🌸';
+  DOM.profileSignature.textContent = state.signature || '把简单的事情做漂亮。';
   DOM.profileSince.textContent = new Date().toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', year: 'numeric' });
   [DOM.headerAvatarBtn, DOM.chatAvatarBtn, DOM.profileDialogAvatar].forEach((el) => setAvatar(el, state.avatar));
 
@@ -714,10 +820,10 @@ async function register() {
   if (password.length < 6) return toast('注册密码至少 6 位', 'error');
   await api('/api/register', {
     method: 'POST',
-    body: { username, password, avatar: state.uploadedAvatar || '🐱' }
+    body: { username, password, avatar: state.uploadedAvatar || username }
   });
   state.uploadedAvatar = '';
-  DOM.loginAvatarPreview.innerHTML = '📷';
+  DOM.loginAvatarPreview.innerHTML = 'L';
   toast('注册成功，可以登录了');
 }
 
@@ -763,11 +869,12 @@ function openWS() {
       }
       switch (data.type) {
         case 'message':
-          if (data.from === state.username) return;
           const parsed = parseIncomingSender(data.content);
+          const mine = data.from === state.username;
           addMessage({
             text: data.content,
-            avatar: data.avatar || '🐱',
+            type: mine ? 'outgoing' : 'incoming',
+            avatar: mine ? state.avatar : (data.avatar || data.from || 'L'),
             sender: data.from || parsed || '',
             time: data.time
           });
@@ -798,12 +905,22 @@ function openWS() {
 async function sendMessage() {
   const text = DOM.messageInput.value.trim();
   if (!text) return;
+  await sendChatPayload(text, true);
+}
+
+async function sendSticker(stickerId) {
+  if (!state.stickerMap.has(stickerId)) return toast('贴图不存在，请刷新后重试', 'error');
+  await sendChatPayload(serializeSticker(stickerId), false);
+  $('emojiPicker').hidden = true;
+}
+
+async function sendChatPayload(text, clearInput) {
   if (state.mode === 'private') {
     const to = DOM.toUser.value.trim();
     if (!to) return toast('请选择私聊对象', 'error');
     if (state.ws?.readyState === WebSocket.OPEN) {
       state.ws.send(JSON.stringify({ type: 'send', mode: 'private', to, message: text }));
-      DOM.messageInput.value = '';
+      if (clearInput) DOM.messageInput.value = '';
     } else {
       toast('连接未就绪，消息未发送', 'error');
     }
@@ -812,14 +929,14 @@ async function sendMessage() {
     if (!to) return toast('请输入群组名', 'error');
     if (state.ws?.readyState === WebSocket.OPEN) {
       state.ws.send(JSON.stringify({ type: 'send', mode: 'group', to, message: text }));
-      DOM.messageInput.value = '';
+      if (clearInput) DOM.messageInput.value = '';
     } else {
       toast('连接未就绪，消息未发送', 'error');
     }
   } else {
     if (state.ws?.readyState === WebSocket.OPEN) {
       state.ws.send(JSON.stringify({ type: 'send', mode: 'public', message: text }));
-      DOM.messageInput.value = '';
+      if (clearInput) DOM.messageInput.value = '';
     } else {
       toast('连接未就绪，消息未发送', 'error');
     }
@@ -849,8 +966,8 @@ async function logout() {
     try { await api('/api/logout', { method: 'POST', body: {} }); } catch (_) {}
   }
   Object.assign(state, {
-    token: '', username: '', avatar: '🐱',
-    selectedPeer: '', selectedPeerAvatar: '🐱',
+    token: '', username: '', avatar: 'L',
+    selectedPeer: '', selectedPeerAvatar: 'L',
     groups: [], friends: [], onlineUsers: [], messages: 0,
     uploadedAvatar: null, gender: '', signature: '',
     thoughts: [], wsReconnectTimer: null, wsRetries: 0
@@ -904,7 +1021,7 @@ async function openProfile(targetUsername = state.username) {
   DOM.settingsAvatarPreview.parentElement.style.display = isSelf ? 'grid' : 'none';
     DOM.saveAvatarBtn.style.display = isSelf ? '' : 'none';
     DOM.saveProfileBtn.style.display = isSelf ? '' : 'none';
-    setAvatar(DOM.profileDialogAvatar, data.avatar || '🐱');
+    setAvatar(DOM.profileDialogAvatar, data.avatar || target);
     DOM.profileDialog.showModal();
   } catch (err) {
     toast(err.message, 'error');
@@ -926,7 +1043,7 @@ async function saveProfile() {
   await api('/api/profile', { method: 'POST', body: { gender, signature } });
   state.gender = gender;
   state.signature = signature;
-  DOM.profileSignature.textContent = signature || '把简单的事情做漂亮 🌸';
+  DOM.profileSignature.textContent = signature || '把简单的事情做漂亮。';
   toast('个人简介已保存');
   DOM.profileDialog.close();
 }
@@ -937,7 +1054,7 @@ async function saveAvatar() {
   state.avatar = data?.avatar || state.uploadedAvatar;
   state.uploadedAvatar = '';
   [DOM.headerAvatarBtn, DOM.chatAvatarBtn, DOM.profileDialogAvatar].forEach((el) => setAvatar(el, state.avatar));
-  DOM.settingsAvatarPreview.innerHTML = '📷';
+  DOM.settingsAvatarPreview.innerHTML = 'L';
   toast('头像已保存');
 }
 
@@ -1048,16 +1165,13 @@ function bindEvents() {
     picker.hidden = !picker.hidden;
   });
   $('emojiPicker').addEventListener('click', (event) => {
-    const btn = event.target.closest('button');
+    const btn = event.target.closest('button[data-sticker-id]');
     if (!btn) return;
-    const emoji = btn.textContent;
-    const input = DOM.messageInput;
-    const start = input.selectionStart;
-    const end = input.selectionEnd;
-    input.value = input.value.slice(0, start) + emoji + input.value.slice(end);
-    input.selectionStart = input.selectionEnd = start + emoji.length;
-    input.focus();
-    $('emojiPicker').hidden = true;
+    sendSticker(btn.dataset.stickerId).catch((err) => toast(err.message, 'error'));
+  });
+  DOM.sideStickerPreview?.addEventListener('click', (event) => {
+    const btn = event.target.closest('button[data-sticker-id]');
+    if (btn) sendSticker(btn.dataset.stickerId).catch((err) => toast(err.message, 'error'));
   });
   document.addEventListener('click', (event) => {
     const picker = $('emojiPicker');
@@ -1101,8 +1215,11 @@ function bindEvents() {
     DOM.darkModeToggle.checked = !DOM.darkModeToggle.checked;
     DOM.darkModeToggle.dispatchEvent(new Event('change'));
   });
-  DOM.imageToolBtn?.addEventListener('click', () => toast('图片发送入口已准备，当前后端未提供文件消息接口'));
-  DOM.fileToolBtn?.addEventListener('click', () => toast('文件发送入口已准备，当前后端未提供文件消息接口'));
+  DOM.imageToolBtn?.addEventListener('click', () => {
+    $('emojiPicker').hidden = false;
+    DOM.stickerGrid?.querySelector('button')?.focus();
+  });
+  DOM.fileToolBtn?.addEventListener('click', () => toast('文件消息接口位已保留，贴图已可实时发送'));
   $('discoverRailBtn').addEventListener('click', () => openDiscover().catch((err) => toast(err.message, 'error')));
   $('discoverTopBtn').addEventListener('click', () => openDiscover().catch((err) => toast(err.message, 'error')));
   DOM.discoverRefreshBtn.addEventListener('click', () => openDiscover().catch((err) => toast(err.message, 'error')));
@@ -1215,6 +1332,7 @@ function init() {
   setConnectionStatus(false);
   resetMessages();
   bindEvents();
+  loadStickers();
 }
 
 init();

@@ -4,40 +4,42 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Lchat</title>
-  <link rel="stylesheet" href="./styles.css?v=20260430-lchat" />
+  <link rel="stylesheet" href="./styles.css?v=20260504-lchat-2" />
 </head>
 <body>
   <div id="loginPanel" class="login-panel">
     <form id="loginForm" class="login-card">
+      <div class="login-art" aria-hidden="true">
+        <img src="./assets/images/lchat-login-hero.png" alt="" />
+      </div>
       <div class="login-brand">
         <div class="logo-mark" aria-hidden="true"><span>L</span></div>
         <div>
           <h1>Lchat</h1>
-          <p>连接每一个闪闪发光的瞬间</p>
+          <p>清爽、精致、轻视觉小说感的桌面 IM。</p>
         </div>
       </div>
       <label>
         用户名
-        <input id="username" type="text" autocomplete="username" placeholder="alice / bob / charlie" />
+        <input id="username" type="text" autocomplete="username" placeholder="输入用户名" />
       </label>
       <label>
         密码
-        <input id="password" type="password" autocomplete="current-password" placeholder="默认密码 123456" />
+        <input id="password" type="password" autocomplete="current-password" placeholder="输入密码" />
       </label>
       <label class="avatar-upload">
         <input id="loginAvatarUpload" type="file" accept="image/*" />
         <span id="loginAvatarPreview" class="avatar-preview">L</span>
-        <small>注册时可以上传头像，支持 JPG / PNG / GIF / WebP</small>
+        <small>注册时可上传头像，支持 JPG / PNG / GIF / WebP</small>
       </label>
       <button id="connectBtn" class="primary-btn" type="button">登录 Lchat</button>
       <button id="registerBtn" class="secondary-btn" type="button">注册新账号</button>
-      <small class="muted">默认用户：alice、bob、charlie；默认密码：123456</small>
     </form>
   </div>
 
   <div id="appPanel" class="app-shell" hidden>
     <aside class="scene-rail">
-      <button class="rail-logo" type="button" data-panel="home" title="首页">
+      <button class="rail-logo" type="button" data-panel="home" title="主页">
         <span class="logo-mark mini"><span>L</span></span>
         <small>Lchat</small>
       </button>
@@ -48,7 +50,7 @@
       <button class="rail-item" type="button" id="settingsRailBtn" title="设置"><img src="./assets/images/neko-icon-settings.png" alt="" /><small>设置</small></button>
       <div class="rail-footer">
         <div id="wsStatus" class="ws-status offline"><span></span><b>未连接</b></div>
-        <button id="themeQuickBtn" class="theme-toggle" type="button" title="切换主题">☾</button>
+        <button id="themeQuickBtn" class="theme-toggle" type="button" title="切换主题">夜</button>
       </div>
     </aside>
 
@@ -71,13 +73,13 @@
           <button class="top-nav-btn" type="button" id="settingsTopBtn">设置</button>
         </nav>
         <button id="loadHistoryBtn" class="icon-btn" type="button" title="加载历史">↻</button>
-        <button id="logoutBtn" class="icon-btn" type="button" title="退出">⎋</button>
+        <button id="logoutBtn" class="icon-btn" type="button" title="退出">×</button>
         <button id="headerAvatarBtn" class="header-avatar" type="button" title="个人资料"></button>
       </header>
 
       <main class="main-grid">
         <aside class="chat-list-panel">
-          <button id="newMessageBtn" class="new-message" type="button"><span>✦</span>公共聊天室<b>↗</b></button>
+          <button id="newMessageBtn" class="new-message" type="button"><span>✦</span>公共聊天屋<b>→</b></button>
           <div class="side-actions">
             <button id="refreshOnlineBtn" class="mini-action" type="button">刷新在线</button>
             <button id="openAddFriendBtn" class="mini-action" type="button">添加好友</button>
@@ -100,7 +102,7 @@
           <header class="chat-header">
             <button id="chatAvatarBtn" class="chat-avatar" type="button" title="查看资料"></button>
             <div class="chat-heading">
-              <h2 id="chatTitle">公共聊天室</h2>
+              <h2 id="chatTitle">公共聊天屋</h2>
               <p id="chatSubtitle">所有在线用户可见</p>
               <div class="chat-metrics">
                 <span><i class="status-dot"></i>在线</span>
@@ -110,8 +112,8 @@
             </div>
             <div class="chat-actions">
               <button class="icon-btn" id="focusSearchBtn" type="button" title="搜索">⌕</button>
-              <button class="icon-btn" id="callBtn" type="button" title="资料">ⓘ</button>
-              <button class="icon-btn" id="videoBtn" type="button" title="设置">⚙</button>
+              <button class="icon-btn" id="callBtn" type="button" title="语音入口">♪</button>
+              <button class="icon-btn" id="videoBtn" type="button" title="界面设置">⚙</button>
               <button class="icon-btn" id="clearViewBtn" type="button" title="清空当前视图">⌫</button>
               <button class="icon-btn" id="moreBtn" type="button" title="添加当前联系人为好友">＋</button>
             </div>
@@ -123,21 +125,18 @@
           <section id="messageList" class="messages"></section>
           <footer class="composer">
             <div class="emoji-wrap">
-              <button id="emojiBtn" class="round-btn" type="button" title="表情">♡</button>
-              <div id="emojiPicker" class="emoji-picker" hidden>
-                <div class="emoji-category">表情</div>
-                <div class="emoji-grid">
-                  <button type="button">😊</button><button type="button">😄</button><button type="button">😂</button>
-                  <button type="button">❤️</button><button type="button">🥰</button><button type="button">🤗</button>
-                  <button type="button">😋</button><button type="button">😌</button><button type="button">😎</button>
-                  <button type="button">✨</button><button type="button">🌸</button><button type="button">⭐</button>
-                  <button type="button">🎀</button><button type="button">🍰</button><button type="button">☕</button>
-                  <button type="button">👍</button><button type="button">👏</button><button type="button">🙌</button>
+              <button id="emojiBtn" class="round-btn" type="button" title="Lchat 贴图">贴</button>
+              <div id="emojiPicker" class="emoji-picker sticker-picker" hidden>
+                <div class="emoji-category">
+                  <span>Lchat 贴图</span>
+                  <small id="stickerPackName">加载中</small>
                 </div>
+                <div id="stickerPackTabs" class="sticker-pack-tabs"></div>
+                <div id="stickerGrid" class="emoji-grid sticker-grid"></div>
               </div>
             </div>
-            <button id="imageToolBtn" class="round-btn" type="button" title="图片">▧</button>
-            <button id="fileToolBtn" class="round-btn" type="button" title="文件">⌘</button>
+            <button id="imageToolBtn" class="round-btn" type="button" title="图片">图</button>
+            <button id="fileToolBtn" class="round-btn" type="button" title="文件">文</button>
             <textarea id="messageInput" rows="1" placeholder="输入消息，Enter 发送，Shift + Enter 换行"></textarea>
             <button id="sendBtn" class="send-btn" type="button">发送</button>
           </footer>
@@ -169,6 +168,10 @@
               <button class="secondary-btn" type="button" id="quickCreateGroupBtn">创建群组</button>
               <button class="secondary-btn" type="button" id="quickUploadAvatarBtn">上传头像</button>
             </div>
+            <section class="sticker-preview-card">
+              <h4>本期贴图</h4>
+              <div id="sideStickerPreview" class="side-stickers"></div>
+            </section>
             <section class="info-block">
               <h4>最近在线</h4>
               <ul id="sideOnlineList" class="mini-list"></ul>
@@ -179,7 +182,7 @@
             </section>
             <section class="notice-card">
               <b>今日公告</b>
-              <span>欢迎来到 Lchat。愿每一次连接都轻盈、清楚、闪闪发光。</span>
+              <span>欢迎来到 Lchat。愿每一次连接都轻盈、清晰、闪闪发光。</span>
             </section>
           </div>
         </aside>
@@ -286,6 +289,6 @@
   </dialog>
 
   <div id="toastHost" class="toast-host"></div>
-  <script src="./app.js?v=20260430-lchat"></script>
+  <script src="./app.js?v=20260504-lchat-2"></script>
 </body>
 </html>

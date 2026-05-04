@@ -7,8 +7,8 @@ import (
 	"crypto/tls"
 	"encoding/hex"
 	"fmt"
-	"net"
 	"log/slog"
+	"net"
 	"regexp"
 	"strings"
 	"sync"
@@ -18,6 +18,8 @@ import (
 	"IM-system/internal/db"
 	"IM-system/internal/model"
 )
+
+var htmlTagRe = regexp.MustCompile(`<[^>]*>`)
 
 type Server struct {
 	Ip   string
@@ -48,12 +50,14 @@ type Server struct {
 	webListener net.Listener
 	wg          sync.WaitGroup
 
-	idleTimeout     time.Duration
-	sessionTTL      time.Duration
-	sessionCleanup  time.Duration
-	maxMsgLength    int
-	uploadDir		string
-	webAddr         string
+	idleTimeout    time.Duration
+	sessionTTL     time.Duration
+	sessionCleanup time.Duration
+	maxMsgLength   int
+	uploadDir      string
+	webAddr        string
+	historyLimit   int
+	historyMax     int
 }
 
 func New(cfg *config.Config) (*Server, error) {
@@ -64,24 +68,26 @@ func New(cfg *config.Config) (*Server, error) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	server := &Server{
-		Ip:            cfg.Server.IP,
-		Port:          cfg.Server.Port,
-		OnlineMap:     make(map[string]*User),
-		WSConns:       make(map[string]*WSClient),
-		SessionTokens: make(map[string]*model.Session),
-		Message:       make(chan string, 100),
-		DB:            database,
-		loginLimiter:  newRateLimiter(cfg.App.RateLimit, cfg.App.RateWindow.ToDuration()),
+		Ip:              cfg.Server.IP,
+		Port:            cfg.Server.Port,
+		OnlineMap:       make(map[string]*User),
+		WSConns:         make(map[string]*WSClient),
+		SessionTokens:   make(map[string]*model.Session),
+		Message:         make(chan string, 100),
+		DB:              database,
+		loginLimiter:    newRateLimiter(cfg.App.RateLimit, cfg.App.RateWindow.ToDuration()),
 		registerLimiter: newRateLimiter(cfg.App.RateLimit, cfg.App.RateWindow.ToDuration()),
 		sendLimiter:     newRateLimiter(cfg.App.RateLimit, cfg.App.RateWindow.ToDuration()),
-		ctx:           ctx,
-		cancel:        cancel,
-		idleTimeout:   cfg.Server.IdleTimeout.ToDuration(),
-		sessionTTL:    cfg.App.SessionTTL.ToDuration(),
-		sessionCleanup: cfg.App.SessionCleanup.ToDuration(),
-		maxMsgLength:  cfg.App.MaxMsgLength,
-		webAddr:       cfg.Web.Addr,
-		uploadDir:      cfg.Web.UploadDir,
+		ctx:             ctx,
+		cancel:          cancel,
+		idleTimeout:     cfg.Server.IdleTimeout.ToDuration(),
+		sessionTTL:      cfg.App.SessionTTL.ToDuration(),
+		sessionCleanup:  cfg.App.SessionCleanup.ToDuration(),
+		maxMsgLength:    cfg.App.MaxMsgLength,
+		webAddr:         cfg.Web.Addr,
+		uploadDir:       cfg.Web.UploadDir,
+		historyLimit:    cfg.App.HistoryLimit,
+		historyMax:      cfg.App.HistoryMax,
 	}
 
 	server.wg.Add(1)
@@ -90,13 +96,12 @@ func New(cfg *config.Config) (*Server, error) {
 	if cfg.Server.TLS {
 		cert, err := generateSelfSignedCert()
 		if err != nil {
-			slog.Warn("failed to generate TLS cert", "error", err)
-		} else {
-			server.TLSConfig = &tls.Config{
-				Certificates: []tls.Certificate{cert},
-			}
-			slog.Info("tls enabled")
+			return nil, fmt.Errorf("failed to generate TLS cert: %w", err)
 		}
+		server.TLSConfig = &tls.Config{
+			Certificates: []tls.Certificate{cert},
+		}
+		slog.Info("tls enabled")
 	}
 
 	return server, nil
@@ -165,6 +170,7 @@ func (s *Server) Shutdown() {
 	if s.tcpListener != nil {
 		s.tcpListener.Close()
 	}
+	s.DB.Close()
 	s.wg.Wait()
 }
 
@@ -208,7 +214,6 @@ func (s *Server) Handler(conn net.Conn) {
 }
 
 func (s *Server) ListenMessager() {
-	defer s.wg.Done()
 	for {
 		select {
 		case <-s.ctx.Done():
@@ -225,15 +230,13 @@ func (s *Server) ListenMessager() {
 				}
 			}
 			s.mapLock.RUnlock()
-
-			s.sendToWSConns(msg)
 		}
 	}
 }
 
 func (s *Server) BroadCast(user *User, msg string) {
 	msg = sanitizeInputWithLimit(msg, s.maxMsgLength)
-	sendMsg := "[" + user.Addr + "] " + user.Name + ": " + msg
+	sendMsg := user.Name + ": " + msg
 	slog.Info("broadcast from tcp", "from", user.Name, "addr", user.Addr, "msg", msg)
 
 	fromUser, err := s.DB.GetUserByUsername(user.Name)
@@ -244,12 +247,39 @@ func (s *Server) BroadCast(user *User, msg string) {
 		}
 	}
 
-	s.Message <- sendMsg
+	// Deliver to TCP clients
+	select {
+	case s.Message <- sendMsg:
+	default:
+		slog.Warn("message channel full, dropping broadcast", "from", user.Name)
+	}
+
+	// Deliver to WebSocket clients with proper JSON format
+	isSystem := msg == "已上线" || msg == "已下线"
+	s.wsLock.RLock()
+	for _, client := range s.WSConns {
+		if isSystem {
+			s.writeWS(client, wsOutgoing{
+				Type:    "system",
+				Content: user.Name + " " + msg,
+			})
+		} else {
+			s.writeWS(client, wsOutgoing{
+				Type:    "message",
+				Mode:    "public",
+				From:    user.Name,
+				Avatar:  user.Avatar,
+				Content: msg,
+				Time:    nowLabelWS(),
+			})
+		}
+	}
+	s.wsLock.RUnlock()
 }
 
 func (s *Server) BroadCastFromWeb(name string, msg string, avatar string) {
 	msg = sanitizeInputWithLimit(msg, s.maxMsgLength)
-	sendMsg := "[WEB] " + name + ": " + msg
+	sendMsg := name + ": " + msg
 	slog.Info("broadcast from web", "from", name, "msg", msg)
 
 	if fromUser, err := s.DB.GetUserByUsername(name); err == nil {
@@ -258,7 +288,24 @@ func (s *Server) BroadCastFromWeb(name string, msg string, avatar string) {
 		}
 	}
 
-	s.Message <- sendMsg
+	select {
+	case s.Message <- sendMsg:
+	default:
+		slog.Warn("message channel full, dropping web broadcast", "from", name)
+	}
+
+	s.wsLock.RLock()
+	for _, client := range s.WSConns {
+		s.writeWS(client, wsOutgoing{
+			Type:    "message",
+			Mode:    "public",
+			From:    name,
+			Avatar:  avatar,
+			Content: msg,
+			Time:    nowLabelWS(),
+		})
+	}
+	s.wsLock.RUnlock()
 }
 
 func (s *Server) BroadCastToGroup(groupName, from, msg, avatar string) error {
@@ -289,7 +336,7 @@ func (s *Server) BroadCastToGroup(groupName, from, msg, avatar string) error {
 
 	_, err = s.DB.SaveMessage(fromUser.ID, nil, &groupID, msg, "group")
 	if err != nil {
-			slog.Warn("failed to save group message", "error", err)
+		slog.Warn("failed to save group message", "error", err)
 	}
 
 	for _, member := range members {
@@ -299,15 +346,21 @@ func (s *Server) BroadCastToGroup(groupName, from, msg, avatar string) error {
 		}
 		s.mapLock.RUnlock()
 
-		s.wsLock.RLock()
-		if client, ok := s.WSConns[member.Username]; ok {
-			select {
-			case client.C <- sendMsg:
-			case <-client.ctx.Done():
-			default:
-			}
+		outgoing := wsOutgoing{
+			Type:    "message",
+			Mode:    "group",
+			Group:   groupName,
+			From:    from,
+			Avatar:  avatar,
+			Content: msg,
+			Time:    nowLabelWS(),
 		}
+		s.wsLock.RLock()
+		client, ok := s.WSConns[member.Username]
 		s.wsLock.RUnlock()
+		if ok {
+			s.writeWS(client, outgoing)
+		}
 	}
 	return nil
 }
@@ -327,7 +380,7 @@ func (s *Server) SendPrivate(from, to, content, avatar string) error {
 
 	_, err = s.DB.SaveMessage(fromUser.ID, &toUser.ID, nil, content, "private")
 	if err != nil {
-			slog.Warn("failed to save private message", "error", err)
+		slog.Warn("failed to save private message", "error", err)
 	}
 
 	s.mapLock.RLock()
@@ -338,17 +391,22 @@ func (s *Server) SendPrivate(from, to, content, avatar string) error {
 	}
 	s.mapLock.RUnlock()
 
+	outgoing := wsOutgoing{
+		Type:    "message",
+		Mode:    "private",
+		From:    from,
+		To:      to,
+		Avatar:  avatar,
+		Content: content,
+		Time:    nowLabelWS(),
+	}
 	s.wsLock.RLock()
-	if client, ok := s.WSConns[to]; ok {
-		select {
-		case client.C <- "[私聊] " + from + ": " + content:
-		default:
-				slog.Warn("web client queue full, skip private", "to", to)
-		}
-		s.wsLock.RUnlock()
+	client, ok := s.WSConns[to]
+	s.wsLock.RUnlock()
+	if ok {
+		s.writeWS(client, outgoing)
 		return nil
 	}
-	s.wsLock.RUnlock()
 
 	slog.Info("private message saved for offline user", "from", from, "to", to)
 	return nil
@@ -437,22 +495,6 @@ func (s *Server) RenameWSClient(oldName, newName string) error {
 	client.Name = newName
 	s.WSConns[newName] = client
 	return nil
-}
-
-func (s *Server) RemoveWebClient(name string) {
-	s.RemoveWSClient(name)
-}
-
-func (s *Server) sendToWSConns(message string) {
-	s.wsLock.RLock()
-	defer s.wsLock.RUnlock()
-	for _, client := range s.WSConns {
-		select {
-		case client.C <- message:
-		case <-client.ctx.Done():
-		default:
-		}
-	}
 }
 
 func (s *Server) Authenticate(username, password string) (string, bool) {
@@ -580,8 +622,13 @@ func sanitizeInput(input string) string {
 }
 
 func sanitizeInputWithLimit(input string, maxLen int) string {
-	re := regexp.MustCompile(`<[^>]*>`)
-	input = re.ReplaceAllString(input, "")
+	for {
+		stripped := htmlTagRe.ReplaceAllString(input, "")
+		if stripped == input {
+			break
+		}
+		input = stripped
+	}
 	if len(input) > maxLen {
 		input = input[:maxLen] + "..."
 	}
