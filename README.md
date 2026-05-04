@@ -1,4 +1,4 @@
-# NekoChat - 轻量级即时通讯系统
+# Lchat - 轻量级即时通讯系统
 
 一个基于 Go 的轻量级即时通讯系统，支持 **TCP 命令行客户端** 和 **Web UI** 双端接入。后端集成 SQLite 持久化、REST API、WebSocket 实时推送，用户数据互通。
 
