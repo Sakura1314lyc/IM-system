@@ -1,9 +1,25 @@
 services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   im-server:
     build: .
     ports:
       - "8888:8888"
       - "8080:8080"
+    depends_on:
+      redis:
+        condition: service_healthy
     volumes:
       - im-data:/app/data
       - im-uploads:/app/uploads
@@ -12,6 +28,8 @@ services:
       - IM_WEB_ADDR=:8080
       - IM_DB_PATH=/app/data/im.db
       - IM_UPLOAD_DIR=/app/uploads
+      - IM_SESSION_BACKEND=redis
+      - IM_REDIS_ADDR=redis:6379
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8080/api/online"]
@@ -26,3 +44,4 @@ services:
 volumes:
   im-data:
   im-uploads:
+  redis-data:

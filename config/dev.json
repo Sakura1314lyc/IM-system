@@ -19,6 +19,10 @@
         "rate_window": "1m",
         "max_msg_length": 500,
         "history_limit": 300,
-        "history_max": 500
+        "history_max": 500,
+        "session_backend": "memory",
+        "redis_addr": "localhost:6379",
+        "redis_password": "",
+        "redis_db": 0
     }
 }

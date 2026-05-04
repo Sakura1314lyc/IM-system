@@ -211,8 +211,7 @@ func newTestHTTPHarness(t *testing.T) *testHTTPHarness {
 		Port:            0,
 		OnlineMap:       make(map[string]*User),
 		WSConns:         make(map[string]*WSClient),
-		SessionTokens:   make(map[string]*model.Session),
-		Message:         make(chan string, 100),
+		Sessions: NewMemorySessionStore(),
 		DB:              mock,
 		loginLimiter:    newRateLimiter(100, time.Minute),
 		registerLimiter: newRateLimiter(100, time.Minute),
@@ -249,10 +248,10 @@ func newTestHTTPHarness(t *testing.T) *testHTTPHarness {
 	httpServer := httptest.NewServer(mux)
 
 	tokens := make(map[string]string)
-	tokens["alice"] = "alice-test-token"
-	tokens["bob"] = "bob-test-token"
-	s.SessionTokens["alice-test-token"] = &model.Session{Username: "alice", CreatedAt: time.Now(), ExpiresAt: time.Now().Add(time.Hour)}
-	s.SessionTokens["bob-test-token"] = &model.Session{Username: "bob", CreatedAt: time.Now(), ExpiresAt: time.Now().Add(time.Hour)}
+	tokenAlice, _ := s.CreateSession("alice")
+	tokenBob, _ := s.CreateSession("bob")
+	tokens["alice"] = tokenAlice
+	tokens["bob"] = tokenBob
 
 	// Register alice as a WebSocket client so handleRename succeeds
 	wsCtx, wsCancel := context.WithCancel(context.Background())
@@ -386,7 +385,7 @@ func TestHandleLogout(t *testing.T) {
 	defer h.close()
 
 	t.Run("successful logout", func(t *testing.T) {
-		w := h.postJSON("/api/logout", map[string]string{"token": "alice-test-token"})
+		w := h.postJSON("/api/logout", map[string]string{"token": h.tokens["alice"]})
 		if w.Code != http.StatusNoContent {
 			t.Errorf("expected 204, got %d", w.Code)
 		}
@@ -405,7 +404,7 @@ func TestHandleProfile(t *testing.T) {
 	defer h.close()
 
 	t.Run("get own profile", func(t *testing.T) {
-		w := h.get("/api/profile?token=alice-test-token")
+		w := h.get("/api/profile?token=" + h.tokens["alice"] )
 		if w.Code != http.StatusOK {
 			t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 		}
@@ -424,7 +423,7 @@ func TestHandleProfile(t *testing.T) {
 	})
 
 	t.Run("update profile", func(t *testing.T) {
-		w := h.postJSON("/api/profile", map[string]string{"token": "alice-test-token", "gender": "female", "signature": "new sig"})
+		w := h.postJSON("/api/profile", map[string]string{"token": h.tokens["alice"], "gender": "female", "signature": "new sig"})
 		if w.Code != http.StatusNoContent {
 			t.Errorf("expected 204, got %d: %s", w.Code, w.Body.String())
 		}
@@ -441,14 +440,14 @@ func TestHandleRename(t *testing.T) {
 	defer h.close()
 
 	t.Run("successful rename", func(t *testing.T) {
-		w := h.postJSON("/api/rename", map[string]string{"token": "alice-test-token", "new": "alice-new"})
+		w := h.postJSON("/api/rename", map[string]string{"token": h.tokens["alice"], "new": "alice-new"})
 		if w.Code != http.StatusNoContent {
 			t.Errorf("expected 204, got %d: %s", w.Code, w.Body.String())
 		}
 	})
 
 	t.Run("missing fields", func(t *testing.T) {
-		w := h.postJSON("/api/rename", map[string]string{"token": "alice-test-token", "new": ""})
+		w := h.postJSON("/api/rename", map[string]string{"token": h.tokens["alice"], "new": ""})
 		if w.Code != http.StatusBadRequest {
 			t.Errorf("expected 400, got %d", w.Code)
 		}
@@ -460,14 +459,14 @@ func TestHandleFriend(t *testing.T) {
 	defer h.close()
 
 	t.Run("add friend", func(t *testing.T) {
-		w := h.postJSON("/api/friend", map[string]string{"token": "alice-test-token", "action": "add", "friend": "bob"})
+		w := h.postJSON("/api/friend", map[string]string{"token": h.tokens["alice"], "action": "add", "friend": "bob"})
 		if w.Code != http.StatusOK {
 			t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 		}
 	})
 
 	t.Run("check friend", func(t *testing.T) {
-		w := h.get("/api/check-friend?token=alice-test-token&friend=bob")
+		w := h.get("/api/check-friend?token=" + h.tokens["alice"] + "&friend=bob")
 		if w.Code != http.StatusOK {
 			t.Fatalf("expected 200, got %d", w.Code)
 		}
@@ -480,7 +479,7 @@ func TestHandleFriend(t *testing.T) {
 	})
 
 	t.Run("remove friend", func(t *testing.T) {
-		w := h.postJSON("/api/friend", map[string]string{"token": "alice-test-token", "action": "remove", "friend": "bob"})
+		w := h.postJSON("/api/friend", map[string]string{"token": h.tokens["alice"], "action": "remove", "friend": "bob"})
 		if w.Code != http.StatusOK {
 			t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 		}
@@ -501,7 +500,7 @@ func TestHandleGroup(t *testing.T) {
 	defer h.close()
 
 	t.Run("create group", func(t *testing.T) {
-		w := h.postJSON("/api/group", map[string]string{"token": "alice-test-token", "action": "create", "groupName": "test-group"})
+		w := h.postJSON("/api/group", map[string]string{"token": h.tokens["alice"], "action": "create", "groupName": "test-group"})
 		if w.Code != http.StatusNoContent {
 			t.Errorf("expected 204, got %d: %s", w.Code, w.Body.String())
 		}
@@ -520,7 +519,7 @@ func TestHandleAvatar(t *testing.T) {
 	defer h.close()
 
 	t.Run("update avatar with emoji", func(t *testing.T) {
-		w := h.postJSON("/api/avatar", map[string]string{"token": "alice-test-token", "avatar": "🦊"})
+		w := h.postJSON("/api/avatar", map[string]string{"token": h.tokens["alice"], "avatar": "🦊"})
 		if w.Code != http.StatusOK {
 			t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
 		}
@@ -552,7 +551,7 @@ func TestHandleHistoryAuth(t *testing.T) {
 	})
 
 	t.Run("public history with auth", func(t *testing.T) {
-		w := h.get("/api/history?token=alice-test-token&type=public")
+		w := h.get("/api/history?token=" + h.tokens["alice"] + "&type=public")
 		if w.Code != http.StatusOK {
 			t.Errorf("expected 200, got %d: %s", w.Code, w.Body.String())
 		}
@@ -571,7 +570,7 @@ func TestHandleFriendsList(t *testing.T) {
 	})
 
 	t.Run("friends list with auth", func(t *testing.T) {
-		w := h.get("/api/friends?token=alice-test-token")
+		w := h.get("/api/friends?token=" + h.tokens["alice"] )
 		if w.Code != http.StatusOK {
 			t.Errorf("expected 200, got %d: %s", w.Code, w.Body.String())
 		}
@@ -590,7 +589,7 @@ func TestHandleGroupsList(t *testing.T) {
 	})
 
 	t.Run("groups list with auth", func(t *testing.T) {
-		w := h.get("/api/groups?token=alice-test-token")
+		w := h.get("/api/groups?token=" + h.tokens["alice"] )
 		if w.Code != http.StatusOK {
 			t.Errorf("expected 200, got %d: %s", w.Code, w.Body.String())
 		}
@@ -633,7 +632,7 @@ func TestHandleSend(t *testing.T) {
 	defer h.close()
 
 	t.Run("public message", func(t *testing.T) {
-		w := h.postJSON("/api/send", map[string]string{"token": "alice-test-token", "message": "hello everyone"})
+		w := h.postJSON("/api/send", map[string]string{"token": h.tokens["alice"], "message": "hello everyone"})
 		if w.Code != http.StatusNoContent {
 			t.Errorf("expected 204, got %d: %s", w.Code, w.Body.String())
 		}
@@ -651,7 +650,7 @@ func TestHandleSend(t *testing.T) {
 		defer h.server.RemoveWSClient("bob")
 
 		w := h.postJSON("/api/send", map[string]string{
-			"token":   "alice-test-token",
+			"token": h.tokens["alice"],
 			"message": "hi bob",
 			"mode":    "private",
 			"to":      "bob",
@@ -666,7 +665,7 @@ func TestHandleSend(t *testing.T) {
 		h.mock.addGroupMember("test-group", &model.UserPublic{ID: 1, Username: "alice", Avatar: "🐱"})
 
 		w := h.postJSON("/api/send", map[string]string{
-			"token":   "alice-test-token",
+			"token": h.tokens["alice"],
 			"message": "hello group",
 			"mode":    "group",
 			"to":      "test-group",
@@ -684,7 +683,7 @@ func TestHandleSend(t *testing.T) {
 	})
 
 	t.Run("missing message", func(t *testing.T) {
-		w := h.postJSON("/api/send", map[string]string{"token": "alice-test-token", "message": ""})
+		w := h.postJSON("/api/send", map[string]string{"token": h.tokens["alice"], "message": ""})
 		if w.Code != http.StatusBadRequest {
 			t.Errorf("expected 400, got %d", w.Code)
 		}
@@ -692,7 +691,7 @@ func TestHandleSend(t *testing.T) {
 
 	t.Run("private without to", func(t *testing.T) {
 		w := h.postJSON("/api/send", map[string]string{
-			"token":   "alice-test-token",
+			"token": h.tokens["alice"],
 			"message": "hi",
 			"mode":    "private",
 			"to":      "",
@@ -746,7 +745,7 @@ func TestHandleFriendEdgeCases(t *testing.T) {
 
 	t.Run("non-existent friend", func(t *testing.T) {
 		w := h.postJSON("/api/friend", map[string]string{
-			"token":  "alice-test-token",
+			"token": h.tokens["alice"],
 			"action": "add",
 			"friend": "nonexistent",
 		})
@@ -771,7 +770,7 @@ func TestHandleGroupEdgeCases(t *testing.T) {
 		h.mock.CreateGroup("join-group", 1, "")
 
 		w := h.postJSON("/api/group", map[string]string{
-			"token":     "alice-test-token",
+			"token": h.tokens["alice"],
 			"action":    "join",
 			"groupName": "join-group",
 		})
@@ -782,7 +781,7 @@ func TestHandleGroupEdgeCases(t *testing.T) {
 
 	t.Run("leave group", func(t *testing.T) {
 		w := h.postJSON("/api/group", map[string]string{
-			"token":     "alice-test-token",
+			"token": h.tokens["alice"],
 			"action":    "leave",
 			"groupName": "join-group",
 		})
@@ -793,7 +792,7 @@ func TestHandleGroupEdgeCases(t *testing.T) {
 
 	t.Run("missing action", func(t *testing.T) {
 		w := h.postJSON("/api/group", map[string]string{
-			"token":     "alice-test-token",
+			"token": h.tokens["alice"],
 			"action":    "",
 			"groupName": "",
 		})
@@ -804,7 +803,7 @@ func TestHandleGroupEdgeCases(t *testing.T) {
 
 	t.Run("unknown action", func(t *testing.T) {
 		w := h.postJSON("/api/group", map[string]string{
-			"token":     "alice-test-token",
+			"token": h.tokens["alice"],
 			"action":    "unknown",
 			"groupName": "test-group",
 		})
@@ -819,7 +818,7 @@ func TestHandleHistoryEdgeCases(t *testing.T) {
 	defer h.close()
 
 	t.Run("public history with auth", func(t *testing.T) {
-		w := h.get("/api/history?token=alice-test-token&type=public")
+		w := h.get("/api/history?token=" + h.tokens["alice"] + "&type=public")
 		if w.Code != http.StatusOK {
 			t.Errorf("expected 200, got %d: %s", w.Code, w.Body.String())
 		}
@@ -841,14 +840,14 @@ func TestHandleHistoryEdgeCases(t *testing.T) {
 	})
 
 	t.Run("private history missing peer", func(t *testing.T) {
-		w := h.get("/api/history?token=alice-test-token&type=private")
+		w := h.get("/api/history?token=" + h.tokens["alice"] + "&type=private")
 		if w.Code != http.StatusBadRequest {
 			t.Errorf("expected 400, got %d", w.Code)
 		}
 	})
 
 	t.Run("group history missing group", func(t *testing.T) {
-		w := h.get("/api/history?token=alice-test-token&type=group")
+		w := h.get("/api/history?token=" + h.tokens["alice"] + "&type=group")
 		if w.Code != http.StatusBadRequest {
 			t.Errorf("expected 400, got %d", w.Code)
 		}

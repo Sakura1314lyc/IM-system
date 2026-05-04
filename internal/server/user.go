@@ -45,7 +45,7 @@ func (u *User) Online() {
 	u.Server.OnlineMap[u.Name] = u
 	u.Server.mapLock.Unlock()
 
-	slog.Info("user online", "name", u.Name, "addr", u.Addr)
+	slog.Debug("user online", "name", u.Name, "addr", u.Addr)
 
 	u.Server.BroadCast(u, "已上线")
 }
@@ -245,7 +245,7 @@ func (u *User) Offline() {
 	}
 	close(u.C)
 
-	slog.Info("user offline", "name", u.Name)
+	slog.Debug("user offline", "name", u.Name)
 }
 
 func (u *User) ListenMessage() {

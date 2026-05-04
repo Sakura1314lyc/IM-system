@@ -843,10 +843,13 @@ function openWS() {
     if (state.ws === ws) {
       state.ws = null;
       setConnectionStatus(false);
-      // Auto reconnect
+      // Auto reconnect with exponential backoff + jitter
       if (state.token) {
-        const delay = Math.min(2 ** (state.wsRetries || 0) * 1000, 30000);
-        state.wsRetries = (state.wsRetries || 0) + 1;
+        const baseDelay = Math.min(Math.pow(2, state.wsRetries) * 1000, 30000);
+        // Add jitter: random between 50% and 100% of base delay
+        const jitter = 0.5 + Math.random() * 0.5;
+        const delay = Math.round(baseDelay * jitter);
+        state.wsRetries++;
         state.wsReconnectTimer = setTimeout(() => openWS(), delay);
       }
     }

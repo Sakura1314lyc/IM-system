@@ -5,7 +5,6 @@ import (
 	"time"
 
 	"IM-system/internal/config"
-	"IM-system/internal/model"
 )
 
 func testServer(t *testing.T) *Server {
@@ -180,17 +179,12 @@ func TestGetUsernameByToken(t *testing.T) {
 	})
 
 	t.Run("expired token returns false", func(t *testing.T) {
-		s.sessionLock.Lock()
-		s.SessionTokens["expired-token"] = &model.Session{
-			Username:  "alice",
-			CreatedAt: time.Now().Add(-48 * time.Hour),
-			ExpiresAt: time.Now().Add(-1 * time.Hour),
-		}
-		s.sessionLock.Unlock()
+		token, _ := s.CreateSession("alice")
+		s.DeleteSession(token)
 
-		_, ok := s.GetUsernameByToken("expired-token")
+		_, ok := s.GetUsernameByToken(token)
 		if ok {
-			t.Error("expected expired token to return false")
+			t.Error("expected deleted token to return false")
 		}
 	})
 }
@@ -363,28 +357,93 @@ func TestShutdown(t *testing.T) {
 	s.Shutdown()
 }
 
-func TestSessionExpiryCausesDeletion(t *testing.T) {
+func TestGracefulShutdown(t *testing.T) {
 	s := testServer(t)
 
-	// Manually insert an expired session
-	s.sessionLock.Lock()
-	s.SessionTokens["already-expired"] = &model.Session{
-		Username:  "alice",
-		CreatedAt: time.Now().Add(-48 * time.Hour),
-		ExpiresAt: time.Now().Add(-1 * time.Hour),
+	// Register a user so we can verify DB state after shutdown
+	if err := s.Register("shutdownuser", "password123", "S"); err != nil {
+		t.Fatalf("Register failed: %v", err)
 	}
-	s.sessionLock.Unlock()
 
-	// GetUsernameByToken should delete expired tokens
-	_, ok := s.GetUsernameByToken("already-expired")
+	// Shutdown — should complete without hanging
+	done := make(chan struct{})
+	go func() {
+		s.Shutdown()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("Shutdown timed out — goroutines may not have cleaned up")
+	}
+
+	// After shutdown, DB operations should fail
+	_, err := s.DB.GetUserByUsername("shutdownuser")
+	if err == nil {
+		t.Error("expected DB operations to fail after shutdown")
+	}
+
+	// Context should be cancelled
+	select {
+	case <-s.ctx.Done():
+		// expected
+	default:
+		t.Error("expected server context to be cancelled after shutdown")
+	}
+
+	// Double shutdown should not panic
+	s.Shutdown()
+}
+
+func TestSessionExpiryCausesDeletion(t *testing.T) {
+	s := testServer(t)
+	defer s.Shutdown()
+
+	// Create and immediately delete a session
+	token, err := s.CreateSession("alice")
+	if err != nil {
+		t.Fatalf("CreateSession failed: %v", err)
+	}
+
+	// Token should be valid
+	name, ok := s.GetUsernameByToken(token)
+	if !ok {
+		t.Error("expected valid token to return true")
+	}
+	if name != "alice" {
+		t.Errorf("expected username alice, got %s", name)
+	}
+
+	// Delete the session
+	s.DeleteSession(token)
+
+	// Token should no longer be valid
+	_, ok = s.GetUsernameByToken(token)
 	if ok {
-		t.Error("expected expired token to return false")
+		t.Error("expected deleted token to return false")
+	}
+}
+
+func TestSessionStoreCleanup(t *testing.T) {
+	store := NewMemorySessionStore()
+
+	token, err := store.Create("alice", time.Hour)
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
 	}
 
-	s.sessionLock.RLock()
-	_, stillExists := s.SessionTokens["already-expired"]
-	s.sessionLock.RUnlock()
-	if stillExists {
-		t.Error("expected expired session to be deleted from map")
+	// Cleanup should not remove valid sessions
+	store.Cleanup(time.Now())
+	_, ok := store.GetUsername(token)
+	if !ok {
+		t.Error("expected valid token to survive cleanup")
+	}
+
+	// Cleanup with future time should remove all sessions
+	store.Cleanup(time.Now().Add(2 * time.Hour))
+	_, ok = store.GetUsername(token)
+	if ok {
+		t.Error("expected expired token to be cleaned up")
 	}
 }

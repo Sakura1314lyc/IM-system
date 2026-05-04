@@ -49,13 +49,17 @@ type DBConfig struct {
 }
 
 type AppConfig struct {
-	SessionTTL     Duration `json:"session_ttl"`
-	SessionCleanup Duration `json:"session_cleanup"`
-	RateLimit      int      `json:"rate_limit"`
-	RateWindow     Duration `json:"rate_window"`
-	MaxMsgLength   int      `json:"max_msg_length"`
-	HistoryLimit   int      `json:"history_limit"`
-	HistoryMax     int      `json:"history_max"`
+	SessionTTL      Duration `json:"session_ttl"`
+	SessionCleanup  Duration `json:"session_cleanup"`
+	RateLimit       int      `json:"rate_limit"`
+	RateWindow      Duration `json:"rate_window"`
+	MaxMsgLength    int      `json:"max_msg_length"`
+	HistoryLimit    int      `json:"history_limit"`
+	HistoryMax      int      `json:"history_max"`
+	SessionBackend  string   `json:"session_backend"`
+	RedisAddr       string   `json:"redis_addr"`
+	RedisPassword   string   `json:"redis_password"`
+	RedisDB         int      `json:"redis_db"`
 }
 
 type Config struct {
@@ -82,13 +86,17 @@ func DefaultConfig() *Config {
 			Path: "im.db",
 		},
 		App: AppConfig{
-			SessionTTL:     Duration(24 * time.Hour),
-			SessionCleanup: Duration(30 * time.Minute),
-			RateLimit:      10,
-			RateWindow:     Duration(1 * time.Minute),
-			MaxMsgLength:   500,
-			HistoryLimit:   300,
-			HistoryMax:     500,
+			SessionTTL:      Duration(24 * time.Hour),
+			SessionCleanup:  Duration(30 * time.Minute),
+			RateLimit:       10,
+			RateWindow:      Duration(1 * time.Minute),
+			MaxMsgLength:    500,
+			HistoryLimit:    300,
+			HistoryMax:      500,
+			SessionBackend:  "memory",
+			RedisAddr:       "localhost:6379",
+			RedisPassword:   "",
+			RedisDB:         0,
 		},
 	}
 }
@@ -129,6 +137,10 @@ func applyEnvOverrides(cfg *Config) {
 		"IM_MAX_MSG_LENGTH":      func() { cfg.App.MaxMsgLength = getEnvInt("IM_MAX_MSG_LENGTH") },
 		"IM_HISTORY_LIMIT":       func() { cfg.App.HistoryLimit = getEnvInt("IM_HISTORY_LIMIT") },
 		"IM_HISTORY_MAX":         func() { cfg.App.HistoryMax = getEnvInt("IM_HISTORY_MAX") },
+	"IM_SESSION_BACKEND":     func() { cfg.App.SessionBackend = getEnv("IM_SESSION_BACKEND") },
+	"IM_REDIS_ADDR":          func() { cfg.App.RedisAddr = getEnv("IM_REDIS_ADDR") },
+	"IM_REDIS_PASSWORD":      func() { cfg.App.RedisPassword = getEnv("IM_REDIS_PASSWORD") },
+	"IM_REDIS_DB":            func() { cfg.App.RedisDB = getEnvInt("IM_REDIS_DB") },
 	}
 
 	for envName, apply := range overrides {

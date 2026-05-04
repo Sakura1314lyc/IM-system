@@ -16,7 +16,6 @@ import (
 
 	"IM-system/internal/config"
 	"IM-system/internal/db"
-	"IM-system/internal/model"
 )
 
 var htmlTagRe = regexp.MustCompile(`<[^>]*>`)
@@ -31,10 +30,7 @@ type Server struct {
 	WSConns map[string]*WSClient
 	wsLock  sync.RWMutex
 
-	SessionTokens map[string]*model.Session
-	sessionLock   sync.RWMutex
-
-	Message chan string
+	Sessions SessionStore
 
 	DB Storage
 
@@ -58,6 +54,8 @@ type Server struct {
 	webAddr        string
 	historyLimit   int
 	historyMax     int
+	serverID       string
+	bus            MessageBus
 }
 
 func New(cfg *config.Config) (*Server, error) {
@@ -72,8 +70,6 @@ func New(cfg *config.Config) (*Server, error) {
 		Port:            cfg.Server.Port,
 		OnlineMap:       make(map[string]*User),
 		WSConns:         make(map[string]*WSClient),
-		SessionTokens:   make(map[string]*model.Session),
-		Message:         make(chan string, 100),
 		DB:              database,
 		loginLimiter:    newRateLimiter(cfg.App.RateLimit, cfg.App.RateWindow.ToDuration()),
 		registerLimiter: newRateLimiter(cfg.App.RateLimit, cfg.App.RateWindow.ToDuration()),
@@ -90,8 +86,32 @@ func New(cfg *config.Config) (*Server, error) {
 		historyMax:      cfg.App.HistoryMax,
 	}
 
-	server.wg.Add(1)
-	go server.cleanupSessions()
+		// Generate server ID for bus message deduplication
+		rawID := make([]byte, 8)
+		rand.Read(rawID)
+		server.serverID = hex.EncodeToString(rawID)
+
+	if cfg.App.SessionBackend == "redis" {
+		store, err := NewRedisSessionStore(cfg.App.RedisAddr, cfg.App.RedisPassword, cfg.App.RedisDB)
+		if err != nil {
+			return nil, fmt.Errorf("redis session store: %w", err)
+		}
+		server.Sessions = store
+		slog.Info("using redis session store", "addr", cfg.App.RedisAddr)
+
+		bus, err := NewRedisMessageBus(server.serverID, cfg.App.RedisAddr, cfg.App.RedisPassword, cfg.App.RedisDB)
+		if err != nil {
+			return nil, fmt.Errorf("redis message bus: %w", err)
+		}
+		server.bus = bus
+		slog.Info("using redis message bus", "addr", cfg.App.RedisAddr)
+		server.wg.Add(1)
+		go server.startBusReceiver()
+	} else {
+		server.Sessions = NewMemorySessionStore()
+		server.wg.Add(1)
+		go server.cleanupSessions()
+	}
 
 	if cfg.Server.TLS {
 		cert, err := generateSelfSignedCert()
@@ -141,7 +161,6 @@ func (s *Server) Start() {
 		slog.Info("tcp server listening", "addr", addr)
 	}
 
-	go s.ListenMessager()
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
@@ -169,6 +188,10 @@ func (s *Server) Shutdown() {
 	}
 	if s.tcpListener != nil {
 		s.tcpListener.Close()
+	}
+	s.Sessions.Close()
+	if s.bus != nil {
+		s.bus.Close()
 	}
 	s.DB.Close()
 	s.wg.Wait()
@@ -205,7 +228,7 @@ func (s *Server) Handler(conn net.Conn) {
 		select {
 		case <-isLive:
 		case <-time.After(s.idleTimeout):
-			slog.Info("user idle timeout, kicked", "name", user.Name)
+			slog.Warn("user idle timeout, kicked", "name", user.Name)
 			user.SendMsg("你已被踢出")
 			offlineOnce.Do(func() { user.Offline() })
 			return
@@ -213,31 +236,10 @@ func (s *Server) Handler(conn net.Conn) {
 	}
 }
 
-func (s *Server) ListenMessager() {
-	for {
-		select {
-		case <-s.ctx.Done():
-			return
-		case msg := <-s.Message:
-			slog.Info("broadcast message", "msg", msg)
-
-			s.mapLock.RLock()
-			for _, cli := range s.OnlineMap {
-				select {
-				case cli.C <- msg:
-				default:
-					slog.Warn("user queue full, skipped", "name", cli.Name)
-				}
-			}
-			s.mapLock.RUnlock()
-		}
-	}
-}
-
 func (s *Server) BroadCast(user *User, msg string) {
 	msg = sanitizeInputWithLimit(msg, s.maxMsgLength)
 	sendMsg := user.Name + ": " + msg
-	slog.Info("broadcast from tcp", "from", user.Name, "addr", user.Addr, "msg", msg)
+	slog.Debug("broadcast from tcp", "from", user.Name, "addr", user.Addr, "msg", msg)
 
 	fromUser, err := s.DB.GetUserByUsername(user.Name)
 	if err == nil {
@@ -248,11 +250,7 @@ func (s *Server) BroadCast(user *User, msg string) {
 	}
 
 	// Deliver to TCP clients
-	select {
-	case s.Message <- sendMsg:
-	default:
-		slog.Warn("message channel full, dropping broadcast", "from", user.Name)
-	}
+	s.fanoutTCP(sendMsg, user.Name)
 
 	// Deliver to WebSocket clients with proper JSON format
 	isSystem := msg == "已上线" || msg == "已下线"
@@ -275,12 +273,26 @@ func (s *Server) BroadCast(user *User, msg string) {
 		}
 	}
 	s.wsLock.RUnlock()
+	if s.bus != nil {
+		isSystem := msg == "已上线" || msg == "已下线"
+		if isSystem {
+			s.bus.Publish(BusMessage{
+				Type: "system", From: user.Name, Content: user.Name + " " + msg,
+			})
+		} else {
+			s.bus.Publish(BusMessage{
+				Type: "public", From: user.Name, Avatar: user.Avatar,
+				Content: msg, Time: nowLabelWS(),
+			})
+		}
+	}
+
 }
 
 func (s *Server) BroadCastFromWeb(name string, msg string, avatar string) {
 	msg = sanitizeInputWithLimit(msg, s.maxMsgLength)
 	sendMsg := name + ": " + msg
-	slog.Info("broadcast from web", "from", name, "msg", msg)
+	slog.Debug("broadcast from web", "from", name, "msg", msg)
 
 	if fromUser, err := s.DB.GetUserByUsername(name); err == nil {
 		if _, err := s.DB.SaveMessage(fromUser.ID, nil, nil, msg, "public"); err != nil {
@@ -288,11 +300,7 @@ func (s *Server) BroadCastFromWeb(name string, msg string, avatar string) {
 		}
 	}
 
-	select {
-	case s.Message <- sendMsg:
-	default:
-		slog.Warn("message channel full, dropping web broadcast", "from", name)
-	}
+	s.fanoutTCP(sendMsg, name)
 
 	s.wsLock.RLock()
 	for _, client := range s.WSConns {
@@ -306,8 +314,26 @@ func (s *Server) BroadCastFromWeb(name string, msg string, avatar string) {
 		})
 	}
 	s.wsLock.RUnlock()
+	if s.bus != nil {
+		s.bus.Publish(BusMessage{
+			Type: "public", From: name, Avatar: avatar,
+			Content: msg, Time: nowLabelWS(),
+		})
+	}
+
 }
 
+func (s *Server) fanoutTCP(msg string, from string) {
+	s.mapLock.RLock()
+	for _, cli := range s.OnlineMap {
+		select {
+		case cli.C <- msg:
+		default:
+			slog.Warn("user tcp queue full, dropped", "name", cli.Name, "from", from)
+		}
+	}
+	s.mapLock.RUnlock()
+}
 func (s *Server) BroadCastToGroup(groupName, from, msg, avatar string) error {
 	msg = sanitizeInputWithLimit(msg, s.maxMsgLength)
 
@@ -332,7 +358,7 @@ func (s *Server) BroadCastToGroup(groupName, from, msg, avatar string) error {
 	groupID := group.ID
 
 	sendMsg := fmt.Sprintf("[群聊 %s] %s: %s", groupName, from, msg)
-	slog.Info("group broadcast", "group", groupName, "from", from, "msg", msg)
+	slog.Debug("group broadcast", "group", groupName, "from", from, "msg", msg)
 
 	_, err = s.DB.SaveMessage(fromUser.ID, nil, &groupID, msg, "group")
 	if err != nil {
@@ -408,7 +434,7 @@ func (s *Server) SendPrivate(from, to, content, avatar string) error {
 		return nil
 	}
 
-	slog.Info("private message saved for offline user", "from", from, "to", to)
+	slog.Debug("private message saved for offline user", "from", from, "to", to)
 	return nil
 }
 
@@ -542,59 +568,20 @@ func (s *Server) LeaveGroup(groupName, user string) error {
 	return s.DB.LeaveGroup(groupName, userObj.ID)
 }
 
-func (s *Server) generateToken() (string, error) {
-	b := make([]byte, 16)
-	if _, err := rand.Read(b); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(b), nil
-}
-
 func (s *Server) CreateSession(username string) (string, error) {
-	token, err := s.generateToken()
-	if err != nil {
-		return "", err
-	}
-	now := time.Now()
-	s.sessionLock.Lock()
-	defer s.sessionLock.Unlock()
-	s.SessionTokens[token] = &model.Session{
-		Username:  username,
-		CreatedAt: now,
-		ExpiresAt: now.Add(s.sessionTTL),
-	}
-	return token, nil
+	return s.Sessions.Create(username, s.sessionTTL)
 }
 
 func (s *Server) GetUsernameByToken(token string) (string, bool) {
-	s.sessionLock.Lock()
-	defer s.sessionLock.Unlock()
-
-	sess, ok := s.SessionTokens[token]
-	if !ok {
-		return "", false
-	}
-	if sess.IsExpired() {
-		delete(s.SessionTokens, token)
-		return "", false
-	}
-	// Refresh expiry on each use
-	sess.ExpiresAt = time.Now().Add(s.sessionTTL)
-	return sess.Username, true
+	return s.Sessions.GetUsername(token)
 }
 
 func (s *Server) UpdateSessionUsername(token, username string) {
-	s.sessionLock.Lock()
-	defer s.sessionLock.Unlock()
-	if sess, ok := s.SessionTokens[token]; ok {
-		sess.Username = username
-	}
+	s.Sessions.UpdateUsername(token, username)
 }
 
 func (s *Server) DeleteSession(token string) {
-	s.sessionLock.Lock()
-	defer s.sessionLock.Unlock()
-	delete(s.SessionTokens, token)
+	s.Sessions.Delete(token)
 }
 
 func (s *Server) cleanupSessions() {
@@ -606,14 +593,88 @@ func (s *Server) cleanupSessions() {
 		case <-s.ctx.Done():
 			return
 		case <-ticker.C:
-			s.sessionLock.Lock()
-			for token, sess := range s.SessionTokens {
-				if sess.IsExpired() {
-					delete(s.SessionTokens, token)
-				}
-			}
-			s.sessionLock.Unlock()
+			s.Sessions.Cleanup(time.Now())
 		}
+	}
+}
+func (s *Server) startBusReceiver() {
+	defer s.wg.Done()
+	for {
+		msg, err := s.bus.Receive(s.ctx)
+		if err != nil {
+			select {
+			case <-s.ctx.Done():
+				return
+			default:
+				slog.Error("bus receive error", "error", err)
+				continue
+			}
+		}
+		if msg.OriginID == s.serverID {
+			continue
+		}
+		s.deliverBusMessage(msg)
+	}
+}
+
+func (s *Server) deliverBusMessage(msg BusMessage) {
+	switch msg.Type {
+	case "public":
+		s.fanoutTCP(msg.Content, msg.From)
+		outgoing := wsOutgoing{
+			Type: "message", Mode: "public",
+			From: msg.From, Avatar: msg.Avatar,
+			Content: msg.Content, Time: msg.Time,
+		}
+		s.wsLock.RLock()
+		for _, client := range s.WSConns {
+			s.writeWS(client, outgoing)
+		}
+		s.wsLock.RUnlock()
+
+	case "private":
+		s.wsLock.RLock()
+		client, ok := s.WSConns[msg.To]
+		s.wsLock.RUnlock()
+		if ok {
+			s.writeWS(client, wsOutgoing{
+				Type: "message", Mode: "private",
+				From: msg.From, To: msg.To,
+				Avatar: msg.Avatar, Content: msg.Content, Time: msg.Time,
+			})
+		}
+		s.mapLock.RLock()
+		user, ok := s.OnlineMap[msg.To]
+		s.mapLock.RUnlock()
+		if ok {
+			user.SendMsg("[priv] " + msg.From + ": " + msg.Content + "\n")
+		}
+
+	case "group":
+		outgoing := wsOutgoing{
+			Type: "message", Mode: "group",
+			Group: msg.To, From: msg.From,
+			Avatar: msg.Avatar, Content: msg.Content, Time: msg.Time,
+		}
+		textMsg := fmt.Sprintf("[group %s] %s: %s\n", msg.To, msg.From, msg.Content)
+		s.wsLock.RLock()
+		for _, client := range s.WSConns {
+			s.writeWS(client, outgoing)
+		}
+		s.wsLock.RUnlock()
+		s.mapLock.RLock()
+		for _, user := range s.OnlineMap {
+			user.SendMsg(textMsg)
+		}
+		s.mapLock.RUnlock()
+
+	case "system":
+		outgoing := wsOutgoing{Type: "system", Content: msg.Content}
+		s.wsLock.RLock()
+		for _, client := range s.WSConns {
+			s.writeWS(client, outgoing)
+		}
+		s.wsLock.RUnlock()
 	}
 }
 

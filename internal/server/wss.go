@@ -106,7 +106,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	// Write goroutine: reads from client.C and writes to WebSocket connection
 	go func() {
-		defer slog.Info("ws write goroutine exited", "name", client.Name)
+		defer slog.Debug("ws write goroutine exited", "name", client.Name)
 		for {
 			select {
 			case msg := <-client.C:
@@ -206,7 +206,7 @@ func (s *Server) AddWSClient(client *WSClient) {
 	s.wsLock.Lock()
 	defer s.wsLock.Unlock()
 	s.WSConns[client.Name] = client
-	slog.Info("ws client connected", "name", client.Name)
+	slog.Debug("ws client connected", "name", client.Name)
 }
 
 func (s *Server) RemoveWSClient(name string) {
@@ -215,7 +215,7 @@ func (s *Server) RemoveWSClient(name string) {
 	if c, ok := s.WSConns[name]; ok {
 		c.cancel()
 		delete(s.WSConns, name)
-		slog.Info("ws client disconnected", "name", name)
+		slog.Debug("ws client disconnected", "name", name)
 	}
 }
 
@@ -261,7 +261,7 @@ func (s *Server) SendPrivateWS(from, to, content, avatar string) error {
 		return nil
 	}
 
-	slog.Info("private message saved for offline user", "from", from, "to", to)
+	slog.Debug("private message saved for offline user", "from", from, "to", to)
 	return nil
 }
 
@@ -328,13 +328,8 @@ func (s *Server) BroadCastFromWS(name string, msg string, avatar string) {
 		}
 	}
 
-	// Send to TCP clients via Message channel
-	tcpMsg := "[WEB] " + sendMsg
-	select {
-	case s.Message <- tcpMsg:
-	default:
-		slog.Warn("message channel full, dropping ws broadcast", "from", name)
-	}
+	// Send to TCP clients
+	s.fanoutTCP(sendMsg, name)
 
 	// Send to all WS clients
 	outgoing := wsOutgoing{
@@ -349,5 +344,12 @@ func (s *Server) BroadCastFromWS(name string, msg string, avatar string) {
 	defer s.wsLock.RUnlock()
 	for _, client := range s.WSConns {
 		s.writeWS(client, outgoing)
+	}
+
+	if s.bus != nil {
+		s.bus.Publish(BusMessage{
+			Type: "public", From: name, Avatar: avatar,
+			Content: msg, Time: nowLabelWS(),
+		})
 	}
 }
