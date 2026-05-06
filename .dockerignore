@@ -2,3 +2,6 @@
 *.md
 .DS_Store
 .gitignore
+.dockerignore
+Makefile
+render.yaml

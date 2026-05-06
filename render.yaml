@@ -1,0 +1,14 @@
+services:
+  - type: web
+    name: im-system
+    runtime: docker
+    region: singapore
+    plan: free
+    healthCheckPath: /api/online
+    envVars:
+      - key: IM_WEB_ADDR
+        value: :8080
+      - key: IM_DB_PATH
+        value: /app/data/im.db
+      - key: IM_UPLOAD_DIR
+        value: /app/uploads

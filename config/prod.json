@@ -2,7 +2,7 @@
     "server": {
         "ip": "0.0.0.0",
         "port": 8888,
-        "tls": true,
+        "tls": false,
         "idle_timeout": "5m"
     },
     "web": {
