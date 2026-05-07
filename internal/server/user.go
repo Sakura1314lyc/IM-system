@@ -3,9 +3,12 @@ package server
 import (
 	"log/slog"
 	"net"
+	"regexp"
 	"strings"
 	"sync"
 )
+
+var validUsernameRe = regexp.MustCompile(`^[a-zA-Z0-9一-龥_]{2,20}$`)
 
 type User struct {
 	Name            string
@@ -67,6 +70,10 @@ func (u *User) SendMsg(msg string) {
 func (u *User) DoMessage(msg string) {
 	if !u.IsAuthenticated {
 		if strings.HasPrefix(msg, "login|") {
+			if !u.Server.tcpLoginLimiter.Allow(u.Addr) {
+				u.SendMsg("登录过于频繁,请稍后再试\n")
+				return
+			}
 			parts := strings.Split(msg, "|")
 			if len(parts) != 3 {
 				u.SendMsg("登录格式错误,示例:login|username|password\n")
@@ -74,6 +81,10 @@ func (u *User) DoMessage(msg string) {
 			}
 			username := strings.TrimSpace(parts[1])
 			password := strings.TrimSpace(parts[2])
+			if !isValidUsername(username) {
+				u.SendMsg("用户名只能包含字母、数字、中文和下划线\n")
+				return
+			}
 			if avatar, ok := u.Server.Authenticate(username, password); ok {
 				if u.Name != username {
 					if !u.Server.RenameUser(u.Name, username) {
@@ -90,6 +101,10 @@ func (u *User) DoMessage(msg string) {
 				u.SendMsg("用户名或密码错误\n")
 			}
 		} else if strings.HasPrefix(msg, "register|") {
+			if !u.Server.tcpRegisterLimiter.Allow(u.Addr) {
+				u.SendMsg("注册过于频繁,请稍后再试\n")
+				return
+			}
 			parts := strings.Split(msg, "|")
 			if len(parts) != 3 {
 				u.SendMsg("注册格式错误,示例:register|username|password\n")
@@ -97,6 +112,10 @@ func (u *User) DoMessage(msg string) {
 			}
 			username := strings.TrimSpace(parts[1])
 			password := strings.TrimSpace(parts[2])
+			if !isValidUsername(username) {
+				u.SendMsg("用户名只能包含字母、数字、中文和下划线\n")
+				return
+			}
 			if err := u.Server.Register(username, password, "👤"); err != nil {
 				u.SendMsg("注册失败: " + err.Error() + "\n")
 			} else {
@@ -268,4 +287,8 @@ func (u *User) ListenMessage() {
 			return
 		}
 	}
+}
+
+func isValidUsername(name string) bool {
+	return validUsernameRe.MatchString(name)
 }

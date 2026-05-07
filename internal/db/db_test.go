@@ -307,7 +307,7 @@ func TestMessageOperations(t *testing.T) {
 	})
 
 	t.Run("get public messages", func(t *testing.T) {
-		msgs, err := db.GetPublicMessages(10)
+		msgs, err := db.GetPublicMessages(10, 0)
 		if err != nil {
 			t.Fatalf("expected success, got: %v", err)
 		}
@@ -323,7 +323,7 @@ func TestMessageOperations(t *testing.T) {
 	})
 
 	t.Run("get private messages", func(t *testing.T) {
-		msgs, err := db.GetPrivateMessages("alice", "bob", 10)
+		msgs, err := db.GetPrivateMessages("alice", "bob", 10, 0)
 		if err != nil {
 			t.Fatalf("expected success, got: %v", err)
 		}
@@ -339,7 +339,7 @@ func TestMessageOperations(t *testing.T) {
 	})
 
 	t.Run("get group messages", func(t *testing.T) {
-		msgs, err := db.GetGroupMessages("chat-group", 10)
+		msgs, err := db.GetGroupMessages("chat-group", 10, 0)
 		if err != nil {
 			t.Fatalf("expected success, got: %v", err)
 		}
@@ -352,7 +352,7 @@ func TestMessageOperations(t *testing.T) {
 	})
 
 	t.Run("get messages with limit", func(t *testing.T) {
-		msgs, err := db.GetPublicMessages(0)
+		msgs, err := db.GetPublicMessages(0, 0)
 		if err != nil {
 			t.Fatalf("expected success with zero limit, got: %v", err)
 		}
@@ -363,7 +363,7 @@ func TestMessageOperations(t *testing.T) {
 
 	t.Run("get messages from reverse perspective", func(t *testing.T) {
 		// bob and alice should see the same private messages
-		msgs, err := db.GetPrivateMessages("bob", "alice", 10)
+		msgs, err := db.GetPrivateMessages("bob", "alice", 10, 0)
 		if err != nil {
 			t.Fatalf("expected success, got: %v", err)
 		}
@@ -373,7 +373,7 @@ func TestMessageOperations(t *testing.T) {
 	})
 
 	t.Run("get messages for non-existent group", func(t *testing.T) {
-		msgs, err := db.GetGroupMessages("non-existent-group", 10)
+		msgs, err := db.GetGroupMessages("non-existent-group", 10, 0)
 		if err != nil {
 			t.Fatalf("expected no error for non-existent group, got: %v", err)
 		}

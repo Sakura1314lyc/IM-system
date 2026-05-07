@@ -14,6 +14,8 @@ import (
 	"math/big"
 	"net"
 	"net/http"
+	"net/http/pprof"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -118,6 +120,14 @@ func (s *Server) StartWeb() {
 	mux.HandleFunc("/api/friend", s.handleFriend)
 	mux.HandleFunc("/api/friends", s.authQueryMiddleware(s.handleFriends))
 	mux.HandleFunc("/api/check-friend", s.authQueryMiddleware(s.handleCheckFriend))
+		mux.HandleFunc("/api/metrics", s.handleMetrics)
+
+		// pprof endpoints for runtime profiling
+		mux.HandleFunc("/debug/pprof/", pprof.Index)
+		mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+		mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+		mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+		mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
 
 	listener, finalAddr, err := listenWithFallback(addr, 20)
 	if err != nil {
@@ -157,6 +167,10 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 
 	if strings.TrimSpace(data.Username) == "" || strings.TrimSpace(data.Password) == "" {
 		http.Error(w, "用户名和密码不能为空", http.StatusBadRequest)
+		return
+	}
+	if !isValidUsername(data.Username) {
+		http.Error(w, "用户名只能包含字母、数字、中文和下划线(2-20位)", http.StatusBadRequest)
 		return
 	}
 
@@ -408,6 +422,35 @@ func (s *Server) handleAvatar(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{"avatar": avatarURL})
 }
 
+func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "只支持 GET", http.StatusMethodNotAllowed)
+		return
+	}
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+
+	s.mapLock.RLock()
+	tcpOnline := len(s.OnlineMap)
+	s.mapLock.RUnlock()
+	s.wsLock.RLock()
+	wsOnline := len(s.WSConns)
+	s.wsLock.RUnlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{
+		"goroutines":  runtime.NumGoroutine(),
+		"tcp_online":  tcpOnline,
+		"ws_online":   wsOnline,
+		"total_users": tcpOnline + wsOnline,
+		"alloc_mb":    m.Alloc / 1024 / 1024,
+		"total_alloc": m.TotalAlloc / 1024 / 1024,
+		"sys_mb":      m.Sys / 1024 / 1024,
+		"num_gc":      m.NumGC,
+	})
+}
+
+
 func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "只支持 GET", http.StatusMethodNotAllowed)
@@ -425,6 +468,13 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	beforeID := 0
+	if rawBefore := strings.TrimSpace(r.URL.Query().Get("before")); rawBefore != "" {
+		if parsedBefore, parseErr := strconv.Atoi(rawBefore); parseErr == nil && parsedBefore > 0 {
+			beforeID = parsedBefore
+		}
+	}
+
 	var history any
 	var err error
 
@@ -434,16 +484,16 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "缺少 group 参数", http.StatusBadRequest)
 			return
 		}
-		history, err = s.DB.GetGroupMessages(groupName, limit)
+		history, err = s.DB.GetGroupMessages(groupName, limit, beforeID)
 	case "private":
 		peer := r.URL.Query().Get("peer")
 		if strings.TrimSpace(peer) == "" {
 			http.Error(w, "缺少 peer 参数", http.StatusBadRequest)
 			return
 		}
-		history, err = s.DB.GetPrivateMessages(username, peer, limit)
+		history, err = s.DB.GetPrivateMessages(username, peer, limit, beforeID)
 	default:
-		history, err = s.DB.GetPublicMessages(limit)
+		history, err = s.DB.GetPublicMessages(limit, beforeID)
 	}
 
 	if err != nil {
@@ -518,6 +568,14 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 
 	if strings.TrimSpace(data.Username) == "" || strings.TrimSpace(data.Password) == "" {
 		http.Error(w, "用户名和密码不能为空", http.StatusBadRequest)
+		return
+	}
+	if !isValidUsername(data.Username) {
+		http.Error(w, "用户名只能包含字母、数字、中文和下划线(2-20位)", http.StatusBadRequest)
+		return
+	}
+	if len(strings.TrimSpace(data.Password)) < 6 {
+		http.Error(w, "密码至少6位", http.StatusBadRequest)
 		return
 	}
 

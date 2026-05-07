@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -220,136 +219,13 @@ func (s *Server) RemoveWSClient(name string) {
 }
 
 func (s *Server) SendPrivateWS(from, to, content, avatar string) error {
-	fromUser, err := s.DB.GetUserByUsername(from)
-	if err != nil {
-		return fmt.Errorf("sender not found: %v", err)
-	}
-
-	toUser, err := s.DB.GetUserByUsername(to)
-	if err != nil {
-		return fmt.Errorf("recipient not found: %v", err)
-	}
-
-	_, err = s.DB.SaveMessage(fromUser.ID, &toUser.ID, nil, content, "private")
-	if err != nil {
-		return fmt.Errorf("failed to save message: %v", err)
-	}
-
-	// Try WebSocket delivery
-	s.wsLock.RLock()
-	client, ok := s.WSConns[to]
-	s.wsLock.RUnlock()
-	if ok {
-		s.writeWS(client, wsOutgoing{
-			Type:    "message",
-			Mode:    "private",
-			From:    from,
-			To:      to,
-			Avatar:  avatar,
-			Content: content,
-			Time:    nowLabelWS(),
-		})
-		return nil
-	}
-
-	// Try TCP delivery
-	s.mapLock.RLock()
-	user, ok := s.OnlineMap[to]
-	s.mapLock.RUnlock()
-	if ok {
-		user.SendMsg("[priv] " + from + ": " + content + "\n")
-		return nil
-	}
-
-	slog.Debug("private message saved for offline user", "from", from, "to", to)
-	return nil
+	return s.sendPrivate(from, to, content, avatar)
 }
 
 func (s *Server) BroadCastToGroupWS(groupName, from, msg, avatar string) error {
-	fromUser, err := s.DB.GetUserByUsername(from)
-	if err != nil {
-		return fmt.Errorf("sender not found: %v", err)
-	}
-
-	group, err := s.DB.GetGroupByName(groupName)
-	if err != nil {
-		return fmt.Errorf("group not found: %v", err)
-	}
-
-	members, err := s.DB.GetGroupMembers(groupName)
-	if err != nil {
-		return fmt.Errorf("failed to get members: %v", err)
-	}
-
-	_, err = s.DB.SaveMessage(fromUser.ID, nil, &group.ID, msg, "group")
-	if err != nil {
-		return fmt.Errorf("failed to save message: %v", err)
-	}
-
-	outgoing := wsOutgoing{
-		Type:    "message",
-		Mode:    "group",
-		Group:   groupName,
-		From:    from,
-		Avatar:  avatar,
-		Content: msg,
-		Time:    nowLabelWS(),
-	}
-
-	textMsg := fmt.Sprintf("[group %s] %s: %s\n", groupName, from, msg)
-
-	for _, member := range members {
-		// WebSocket delivery
-		s.wsLock.RLock()
-		if client, ok := s.WSConns[member.Username]; ok {
-			s.writeWS(client, outgoing)
-		}
-		s.wsLock.RUnlock()
-
-		// TCP delivery
-		s.mapLock.RLock()
-		if user, ok := s.OnlineMap[member.Username]; ok {
-			user.SendMsg(textMsg)
-		}
-		s.mapLock.RUnlock()
-	}
-
-	return nil
+	return s.broadcastToGroup(groupName, from, msg, avatar)
 }
 
 func (s *Server) BroadCastFromWS(name string, msg string, avatar string) {
-	sendMsg := name + ": " + msg
-
-	fromUser, err := s.DB.GetUserByUsername(name)
-	if err == nil {
-		_, err = s.DB.SaveMessage(fromUser.ID, nil, nil, msg, "public")
-		if err != nil {
-			slog.Warn("failed to save public message", "error", err)
-		}
-	}
-
-	// Send to TCP clients
-	s.fanoutTCP(sendMsg, name)
-
-	// Send to all WS clients
-	outgoing := wsOutgoing{
-		Type:    "message",
-		Mode:    "public",
-		From:    name,
-		Avatar:  avatar,
-		Content: msg,
-		Time:    nowLabelWS(),
-	}
-	s.wsLock.RLock()
-	defer s.wsLock.RUnlock()
-	for _, client := range s.WSConns {
-		s.writeWS(client, outgoing)
-	}
-
-	if s.bus != nil {
-		s.bus.Publish(BusMessage{
-			Type: "public", From: name, Avatar: avatar,
-			Content: msg, Time: nowLabelWS(),
-		})
-	}
+	s.broadcastPublic(name, msg, avatar, false)
 }

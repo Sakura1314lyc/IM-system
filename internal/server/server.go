@@ -16,6 +16,7 @@ import (
 
 	"IM-system/internal/config"
 	"IM-system/internal/db"
+	"IM-system/internal/model"
 )
 
 var htmlTagRe = regexp.MustCompile(`<[^>]*>`)
@@ -34,9 +35,11 @@ type Server struct {
 
 	DB Storage
 
-	loginLimiter    *rateLimiter
-	registerLimiter *rateLimiter
-	sendLimiter     *rateLimiter
+	loginLimiter      *rateLimiter
+	registerLimiter   *rateLimiter
+	sendLimiter       *rateLimiter
+	tcpLoginLimiter   *rateLimiter
+	tcpRegisterLimiter *rateLimiter
 
 	TLSConfig *tls.Config
 	ctx       context.Context
@@ -71,9 +74,11 @@ func New(cfg *config.Config) (*Server, error) {
 		OnlineMap:       make(map[string]*User),
 		WSConns:         make(map[string]*WSClient),
 		DB:              database,
-		loginLimiter:    newRateLimiter(cfg.App.RateLimit, cfg.App.RateWindow.ToDuration()),
-		registerLimiter: newRateLimiter(cfg.App.RateLimit, cfg.App.RateWindow.ToDuration()),
-		sendLimiter:     newRateLimiter(cfg.App.RateLimit, cfg.App.RateWindow.ToDuration()),
+		loginLimiter:       newRateLimiter(cfg.App.RateLimit, cfg.App.RateWindow.ToDuration()),
+		registerLimiter:    newRateLimiter(cfg.App.RateLimit, cfg.App.RateWindow.ToDuration()),
+		sendLimiter:        newRateLimiter(cfg.App.RateLimit, cfg.App.RateWindow.ToDuration()),
+		tcpLoginLimiter:    newRateLimiter(cfg.App.RateLimit, cfg.App.RateWindow.ToDuration()),
+		tcpRegisterLimiter: newRateLimiter(cfg.App.RateLimit, cfg.App.RateWindow.ToDuration()),
 		ctx:             ctx,
 		cancel:          cancel,
 		idleTimeout:     cfg.Server.IdleTimeout.ToDuration(),
@@ -198,6 +203,12 @@ func (s *Server) Shutdown() {
 }
 
 func (s *Server) Handler(conn net.Conn) {
+	// Enable TCP keepalive for heartbeats
+	if tcpConn, ok := conn.(*net.TCPConn); ok {
+		tcpConn.SetKeepAlive(true)
+		tcpConn.SetKeepAlivePeriod(30 * time.Second)
+	}
+
 	user := NewUser(conn, s)
 	user.Online()
 
@@ -236,91 +247,52 @@ func (s *Server) Handler(conn net.Conn) {
 	}
 }
 
-func (s *Server) BroadCast(user *User, msg string) {
+func (s *Server) broadcastPublic(name, msg, avatar string, isSystem bool) {
 	msg = sanitizeInputWithLimit(msg, s.maxMsgLength)
-	sendMsg := user.Name + ": " + msg
-	slog.Debug("broadcast from tcp", "from", user.Name, "addr", user.Addr, "msg", msg)
+	slog.Debug("broadcast public", "from", name, "msg", msg, "system", isSystem)
 
-	fromUser, err := s.DB.GetUserByUsername(user.Name)
-	if err == nil {
-		_, err = s.DB.SaveMessage(fromUser.ID, nil, nil, msg, "public")
-		if err != nil {
+	if fromUser, err := s.DB.GetUserByUsername(name); err == nil {
+		if _, err := s.DB.SaveMessage(fromUser.ID, nil, nil, msg, "public"); err != nil {
 			slog.Warn("failed to save public message", "error", err)
 		}
 	}
 
-	// Deliver to TCP clients
-	s.fanoutTCP(sendMsg, user.Name)
-
-	// Deliver to WebSocket clients with proper JSON format
-	isSystem := msg == "已上线" || msg == "已下线"
-	s.wsLock.RLock()
-	for _, client := range s.WSConns {
-		if isSystem {
-			s.writeWS(client, wsOutgoing{
-				Type:    "system",
-				Content: user.Name + " " + msg,
-			})
-		} else {
-			s.writeWS(client, wsOutgoing{
-				Type:    "message",
-				Mode:    "public",
-				From:    user.Name,
-				Avatar:  user.Avatar,
-				Content: msg,
-				Time:    nowLabelWS(),
-			})
-		}
-	}
-	s.wsLock.RUnlock()
-	if s.bus != nil {
-		isSystem := msg == "已上线" || msg == "已下线"
-		if isSystem {
-			s.bus.Publish(BusMessage{
-				Type: "system", From: user.Name, Content: user.Name + " " + msg,
-			})
-		} else {
-			s.bus.Publish(BusMessage{
-				Type: "public", From: user.Name, Avatar: user.Avatar,
-				Content: msg, Time: nowLabelWS(),
-			})
-		}
-	}
-
-}
-
-func (s *Server) BroadCastFromWeb(name string, msg string, avatar string) {
-	msg = sanitizeInputWithLimit(msg, s.maxMsgLength)
 	sendMsg := name + ": " + msg
-	slog.Debug("broadcast from web", "from", name, "msg", msg)
-
-	if fromUser, err := s.DB.GetUserByUsername(name); err == nil {
-		if _, err := s.DB.SaveMessage(fromUser.ID, nil, nil, msg, "public"); err != nil {
-			slog.Warn("failed to save web public message", "error", err)
-		}
-	}
-
 	s.fanoutTCP(sendMsg, name)
 
 	s.wsLock.RLock()
 	for _, client := range s.WSConns {
-		s.writeWS(client, wsOutgoing{
-			Type:    "message",
-			Mode:    "public",
-			From:    name,
-			Avatar:  avatar,
-			Content: msg,
-			Time:    nowLabelWS(),
-		})
+		if isSystem {
+			s.writeWS(client, wsOutgoing{Type: "system", Content: name + " " + msg})
+		} else {
+			s.writeWS(client, wsOutgoing{
+				Type: "message", Mode: "public", From: name,
+				Avatar: avatar, Content: msg, Time: nowLabelWS(),
+			})
+		}
 	}
 	s.wsLock.RUnlock()
-	if s.bus != nil {
-		s.bus.Publish(BusMessage{
-			Type: "public", From: name, Avatar: avatar,
-			Content: msg, Time: nowLabelWS(),
-		})
-	}
 
+	if s.bus != nil {
+		if isSystem {
+			s.bus.Publish(BusMessage{Type: "system", From: name, Content: name + " " + msg})
+		} else {
+			s.bus.Publish(BusMessage{Type: "public", From: name, Avatar: avatar, Content: msg, Time: nowLabelWS()})
+		}
+	}
+}
+
+func (s *Server) BroadCast(user *User, msg string) {
+	isSystem := msg == "已上线" || msg == "已下线"
+	if isSystem {
+		s.broadcastPublic(user.Name, msg, user.Avatar, true)
+	} else {
+		s.broadcastPublic(user.Name, msg, user.Avatar, false)
+	}
+}
+
+func (s *Server) BroadCastFromWeb(name string, msg string, avatar string) {
+	s.broadcastPublic(name, msg, avatar, false)
 }
 
 func (s *Server) fanoutTCP(msg string, from string) {
@@ -334,7 +306,58 @@ func (s *Server) fanoutTCP(msg string, from string) {
 	}
 	s.mapLock.RUnlock()
 }
-func (s *Server) BroadCastToGroup(groupName, from, msg, avatar string) error {
+
+func (s *Server) deliverToGroupMembersWS(groupName, from, msg, avatar string, members []*model.UserPublic) {
+	outgoing := wsOutgoing{
+		Type: "message", Mode: "group",
+		Group: groupName, From: from,
+		Avatar: avatar, Content: msg, Time: nowLabelWS(),
+	}
+	for _, member := range members {
+		s.wsLock.RLock()
+		client, ok := s.WSConns[member.Username]
+		s.wsLock.RUnlock()
+		if ok {
+			s.writeWS(client, outgoing)
+		}
+	}
+}
+
+func (s *Server) deliverToGroupMembersTCP(groupName, from, msg string, members []*model.UserPublic) {
+	textMsg := fmt.Sprintf("[群聊 %s] %s: %s", groupName, from, msg)
+	s.mapLock.RLock()
+	for _, member := range members {
+		if user, ok := s.OnlineMap[member.Username]; ok {
+			user.SendMsg(textMsg + "\n")
+		}
+	}
+	s.mapLock.RUnlock()
+}
+
+func (s *Server) deliverPrivateWS(from, to, content, avatar string) {
+	outgoing := wsOutgoing{
+		Type: "message", Mode: "private",
+		From: from, To: to,
+		Avatar: avatar, Content: content, Time: nowLabelWS(),
+	}
+	s.wsLock.RLock()
+	client, ok := s.WSConns[to]
+	s.wsLock.RUnlock()
+	if ok {
+		s.writeWS(client, outgoing)
+	}
+}
+
+func (s *Server) deliverPrivateTCP(from, to, content string) {
+	s.mapLock.RLock()
+	user, ok := s.OnlineMap[to]
+	s.mapLock.RUnlock()
+	if ok {
+		user.SendMsg("[私聊] " + from + ": " + content + "\n")
+	}
+}
+
+func (s *Server) broadcastToGroup(groupName, from, msg, avatar string) error {
 	msg = sanitizeInputWithLimit(msg, s.maxMsgLength)
 
 	fromUser, err := s.DB.GetUserByUsername(from)
@@ -355,43 +378,18 @@ func (s *Server) BroadCastToGroup(groupName, from, msg, avatar string) error {
 	if err != nil {
 		return fmt.Errorf("获取群组ID失败: %v", err)
 	}
-	groupID := group.ID
 
-	sendMsg := fmt.Sprintf("[群聊 %s] %s: %s", groupName, from, msg)
-	slog.Debug("group broadcast", "group", groupName, "from", from, "msg", msg)
-
-	_, err = s.DB.SaveMessage(fromUser.ID, nil, &groupID, msg, "group")
+	_, err = s.DB.SaveMessage(fromUser.ID, nil, &group.ID, msg, "group")
 	if err != nil {
 		slog.Warn("failed to save group message", "error", err)
 	}
 
-	for _, member := range members {
-		s.mapLock.RLock()
-		if user, ok := s.OnlineMap[member.Username]; ok {
-			user.SendMsg(sendMsg + "\n")
-		}
-		s.mapLock.RUnlock()
-
-		outgoing := wsOutgoing{
-			Type:    "message",
-			Mode:    "group",
-			Group:   groupName,
-			From:    from,
-			Avatar:  avatar,
-			Content: msg,
-			Time:    nowLabelWS(),
-		}
-		s.wsLock.RLock()
-		client, ok := s.WSConns[member.Username]
-		s.wsLock.RUnlock()
-		if ok {
-			s.writeWS(client, outgoing)
-		}
-	}
+	s.deliverToGroupMembersTCP(groupName, from, msg, members)
+	s.deliverToGroupMembersWS(groupName, from, msg, avatar, members)
 	return nil
 }
 
-func (s *Server) SendPrivate(from, to, content, avatar string) error {
+func (s *Server) sendPrivate(from, to, content, avatar string) error {
 	content = sanitizeInputWithLimit(content, s.maxMsgLength)
 
 	fromUser, err := s.DB.GetUserByUsername(from)
@@ -409,33 +407,17 @@ func (s *Server) SendPrivate(from, to, content, avatar string) error {
 		slog.Warn("failed to save private message", "error", err)
 	}
 
-	s.mapLock.RLock()
-	if user, ok := s.OnlineMap[to]; ok {
-		user.SendMsg("[私聊] " + from + ": " + content + "\n")
-		s.mapLock.RUnlock()
-		return nil
-	}
-	s.mapLock.RUnlock()
-
-	outgoing := wsOutgoing{
-		Type:    "message",
-		Mode:    "private",
-		From:    from,
-		To:      to,
-		Avatar:  avatar,
-		Content: content,
-		Time:    nowLabelWS(),
-	}
-	s.wsLock.RLock()
-	client, ok := s.WSConns[to]
-	s.wsLock.RUnlock()
-	if ok {
-		s.writeWS(client, outgoing)
-		return nil
-	}
-
-	slog.Debug("private message saved for offline user", "from", from, "to", to)
+	s.deliverPrivateTCP(from, to, content)
+	s.deliverPrivateWS(from, to, content, avatar)
 	return nil
+}
+
+func (s *Server) BroadCastToGroup(groupName, from, msg, avatar string) error {
+	return s.broadcastToGroup(groupName, from, msg, avatar)
+}
+
+func (s *Server) SendPrivate(from, to, content, avatar string) error {
+	return s.sendPrivate(from, to, content, avatar)
 }
 
 func (s *Server) GetOnlineUsers() []map[string]string {

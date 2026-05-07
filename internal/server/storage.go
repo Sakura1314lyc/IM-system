@@ -11,9 +11,9 @@ type Storage interface {
 	UpdateUserProfile(username, gender, signature string) error
 
 	SaveMessage(fromID int, toID *int, groupID *int, content, msgType string) (*model.DBMessage, error)
-	GetPublicMessages(limit int) ([]*model.DBMessageExt, error)
-	GetGroupMessages(groupName string, limit int) ([]*model.DBMessageExt, error)
-	GetPrivateMessages(username, peer string, limit int) ([]*model.DBMessageExt, error)
+	GetPublicMessages(limit int, beforeID int) ([]*model.DBMessageExt, error)
+	GetGroupMessages(groupName string, limit int, beforeID int) ([]*model.DBMessageExt, error)
+	GetPrivateMessages(username, peer string, limit int, beforeID int) ([]*model.DBMessageExt, error)
 
 	CreateGroup(name string, creatorID int, description string) (*model.DBGroup, error)
 	JoinGroup(groupName string, userID int) error

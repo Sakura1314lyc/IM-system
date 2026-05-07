@@ -105,15 +105,15 @@ func (m *mockStorage) SaveMessage(fromID int, toID *int, groupID *int, content, 
 	return &model.DBMessage{ID: 1, FromID: fromID, ToID: toID, GroupID: groupID, Content: content, Type: msgType, CreatedAt: time.Now()}, nil
 }
 
-func (m *mockStorage) GetPublicMessages(limit int) ([]*model.DBMessageExt, error) {
+func (m *mockStorage) GetPublicMessages(limit int, beforeID int) ([]*model.DBMessageExt, error) {
 	return m.messages, nil
 }
 
-func (m *mockStorage) GetGroupMessages(groupName string, limit int) ([]*model.DBMessageExt, error) {
+func (m *mockStorage) GetGroupMessages(groupName string, limit int, beforeID int) ([]*model.DBMessageExt, error) {
 	return nil, nil
 }
 
-func (m *mockStorage) GetPrivateMessages(username, peer string, limit int) ([]*model.DBMessageExt, error) {
+func (m *mockStorage) GetPrivateMessages(username, peer string, limit int, beforeID int) ([]*model.DBMessageExt, error) {
 	return nil, nil
 }
 

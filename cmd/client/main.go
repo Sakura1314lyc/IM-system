@@ -1,11 +1,14 @@
 package main
 
 import (
+	"bufio"
 	"flag"
 	"fmt"
 	"io"
 	"net"
 	"os"
+	"strings"
+	"time"
 )
 
 type Client struct {
@@ -13,85 +16,168 @@ type Client struct {
 	ServerPort int
 	Name       string
 	conn       net.Conn
-	flag       int //表示当前client的模式
+	flag       int // 当前client的模式
+	reader     *bufio.Reader
+	writer     *bufio.Writer
+	authenticated bool
 }
 
 func NewClient(serverip string, serverport int) *Client {
-	//创建用户端对象
 	c := &Client{
 		Serverip:   serverip,
 		ServerPort: serverport,
 		flag:       99,
 	}
 
-	//链接server
 	conn, err := net.Dial("tcp", net.JoinHostPort(serverip, fmt.Sprintf("%d", serverport)))
 	if err != nil {
-		fmt.Println("net.Dial error", err)
+		fmt.Println("net.Dial error:", err)
 		return nil
 	}
 
-	c.conn = conn
+	// 启用 TCP Keep-Alive
+	tcpConn := conn.(*net.TCPConn)
+	tcpConn.SetKeepAlive(true)
+	tcpConn.SetKeepAlivePeriod(30 * time.Second)
 
-	//返回对象
+	c.conn = conn
+	c.reader = bufio.NewReader(conn)
+	c.writer = bufio.NewWriter(conn)
+
 	return c
 }
 
-func (c *Client) menu() bool {
-	var flag int
+func (c *Client) authMenu() bool {
+	var choice int
 
-	fmt.Println("1.公聊模式")
-	fmt.Println("2.私聊模式")
-	fmt.Println("3.更新用户名")
-	fmt.Println("0.退出")
+	fmt.Println("\n========== Lchat TCP 客户端 ==========")
+	fmt.Println("1. 登录")
+	fmt.Println("2. 注册")
+	fmt.Println("0. 退出")
 
-	fmt.Scanln(&flag)
-	if flag >= 0 && flag <= 3 {
-		c.flag = flag
-		return true
-	} else {
+	fmt.Print("请选择: ")
+	fmt.Scanln(&choice)
+
+	switch choice {
+	case 1:
+		return c.doLogin()
+	case 2:
+		return c.doRegister()
+	case 0:
+		return false
+	default:
 		fmt.Println(">>>>>请输入合法范围内的数字<<<<<")
 		return false
 	}
 }
 
+func (c *Client) doLogin() bool {
+	var username, password string
+
+	fmt.Print("用户名: ")
+	fmt.Scanln(&username)
+	fmt.Print("密码: ")
+	fmt.Scanln(&password)
+
+	msg := fmt.Sprintf("login|%s|%s\n", username, password)
+	_, err := c.writer.WriteString(msg)
+	if err != nil {
+		fmt.Println("发送失败:", err)
+		return false
+	}
+	c.writer.Flush()
+
+	// 读取服务器响应
+	resp, err := c.reader.ReadString('\n')
+	if err != nil {
+		fmt.Println("读取响应失败:", err)
+		return false
+	}
+	resp = strings.TrimSpace(resp)
+	fmt.Println(resp)
+
+	if strings.Contains(resp, "登录成功") {
+		c.Name = username
+		c.authenticated = true
+		return true
+	}
+	return false
+}
+
+func (c *Client) doRegister() bool {
+	var username, password string
+
+	fmt.Print("用户名: ")
+	fmt.Scanln(&username)
+	fmt.Print("密码(至少6位): ")
+	fmt.Scanln(&password)
+
+	msg := fmt.Sprintf("register|%s|%s\n", username, password)
+	_, err := c.writer.WriteString(msg)
+	if err != nil {
+		fmt.Println("发送失败:", err)
+		return false
+	}
+	c.writer.Flush()
+
+	resp, err := c.reader.ReadString('\n')
+	if err != nil {
+		fmt.Println("读取响应失败:", err)
+		return false
+	}
+	resp = strings.TrimSpace(resp)
+	fmt.Println(resp)
+
+	return strings.Contains(resp, "注册成功")
+}
+
+func (c *Client) menu() bool {
+	var flag int
+
+	fmt.Println("\n========== Lchat 主菜单 ==========")
+	fmt.Println("1. 公聊模式")
+	fmt.Println("2. 私聊模式")
+	fmt.Println("3. 群聊操作")
+	fmt.Println("4. 更新用户名")
+	fmt.Println("5. 查看在线用户")
+	fmt.Println("0. 退出")
+
+	fmt.Print("请选择: ")
+	fmt.Scanln(&flag)
+	if flag >= 0 && flag <= 5 {
+		c.flag = flag
+		return true
+	}
+	fmt.Println(">>>>>请输入合法范围内的数字<<<<<")
+	return false
+}
+
 func (c *Client) PublicChat() {
-	//提示用户输入消息
 	var chatMsg string
 	fmt.Println(">>>>>输入聊天内容, exit退出.")
 	fmt.Scanln(&chatMsg)
 
 	for chatMsg != "exit" {
-		//发给服务器
-
-		//消息不为空则发送
 		if len(chatMsg) != 0 {
-			sendMsg := chatMsg + "\n"
-			_, err := c.conn.Write([]byte(sendMsg))
+			_, err := c.writer.WriteString(chatMsg + "\n")
 			if err != nil {
-				fmt.Println("conn Write err :", err)
+				fmt.Println("conn Write err:", err)
 				break
 			}
+			c.writer.Flush()
 		}
 
 		chatMsg = ""
 		fmt.Println(">>>>>请输入聊天内容,exit退出.")
 		fmt.Scanln(&chatMsg)
 	}
-
 }
 
-// 查询在线用户
 func (c *Client) SearchUsers() {
-	sendMsg := "who\n"
-	_, err := c.conn.Write([]byte(sendMsg))
-	if err != nil {
-		fmt.Println("conn Write err:", err)
-		return
-	}
+	c.writer.WriteString("who\n")
+	c.writer.Flush()
 }
 
-// 私聊模式
 func (c *Client) Privatechat() {
 	var RemoteName string
 	var ChatMsg string
@@ -105,15 +191,14 @@ func (c *Client) Privatechat() {
 		fmt.Scanln(&ChatMsg)
 
 		for ChatMsg != "exit" {
-			//消息不为空则发送
 			if len(ChatMsg) != 0 {
-
 				sendMsg := "to|" + RemoteName + "|" + ChatMsg + "\n"
-				_, err := c.conn.Write([]byte(sendMsg))
+				_, err := c.writer.WriteString(sendMsg)
 				if err != nil {
 					fmt.Println("conn Write err:", err)
 					break
 				}
+				c.writer.Flush()
 			}
 
 			ChatMsg = ""
@@ -124,47 +209,87 @@ func (c *Client) Privatechat() {
 		c.SearchUsers()
 		fmt.Println(">>>>>请输入聊天对象[用户名], exit退出.")
 		fmt.Scanln(&RemoteName)
-
 	}
 }
 
-func (c *Client) UpdateName() bool {
+func (c *Client) GroupChat() {
+	var action, groupName, content string
 
+	fmt.Println(">>>>>群聊操作: create / join / leave / send")
+	fmt.Print("操作: ")
+	fmt.Scanln(&action)
+
+	switch action {
+	case "create":
+		fmt.Print("群名: ")
+		fmt.Scanln(&groupName)
+		c.writer.WriteString(fmt.Sprintf("group|create|%s\n", groupName))
+	case "join":
+		fmt.Print("群名: ")
+		fmt.Scanln(&groupName)
+		c.writer.WriteString(fmt.Sprintf("group|join|%s\n", groupName))
+	case "leave":
+		fmt.Print("群名: ")
+		fmt.Scanln(&groupName)
+		c.writer.WriteString(fmt.Sprintf("group|leave|%s\n", groupName))
+	case "send":
+		fmt.Print("群名: ")
+		fmt.Scanln(&groupName)
+		fmt.Print("消息: ")
+		fmt.Scanln(&content)
+		c.writer.WriteString(fmt.Sprintf("group|send|%s|%s\n", groupName, content))
+	default:
+		fmt.Println("未知操作")
+		return
+	}
+	c.writer.Flush()
+}
+
+func (c *Client) UpdateName() bool {
 	fmt.Println(">>>>>请输入用户名:")
 	fmt.Scanln(&c.Name)
 
 	sendMsg := "rename|" + c.Name + "\n"
-	_, err := c.conn.Write([]byte(sendMsg))
+	_, err := c.writer.WriteString(sendMsg)
 	if err != nil {
 		fmt.Println("conn.Write err:", err)
 		return false
 	}
+	c.writer.Flush()
 	return true
 }
 
-// 处理server回应的消息，直接显示到标准输出即可
 func (c *Client) DealResponse() {
-	//一旦c.conn 有数据，就直接copy到stdout标准输出上，永久阻塞监听
 	io.Copy(os.Stdout, c.conn)
 }
+
 func (c *Client) Run() {
+	// 先认证
+	for !c.authenticated {
+		if !c.authMenu() {
+			fmt.Println(">>>>>认证失败或退出连接.")
+			return
+		}
+	}
+
+	// 启动后台 goroutine 接收服务器消息
+	go c.DealResponse()
+
 	for c.flag != 0 {
 		for c.menu() != true {
-
 		}
 
-		//根据不同模式处理不同的业务
 		switch c.flag {
 		case 1:
-			//公聊模式
 			c.PublicChat()
 		case 2:
-			//私聊模式
 			c.Privatechat()
 		case 3:
-			//更新用户名
+			c.GroupChat()
+		case 4:
 			c.UpdateName()
-			//go的switch默认break
+		case 5:
+			c.SearchUsers()
 		}
 	}
 }
@@ -172,14 +297,12 @@ func (c *Client) Run() {
 var serverIp string
 var serverPort int
 
-// ./client -ip 127.0.0.1 -port 8888
 func init() {
 	flag.StringVar(&serverIp, "ip", "127.0.0.1", "设置服务器IP地址(默认为127.0.0.1)")
 	flag.IntVar(&serverPort, "port", 8888, "设置服务器端口(默认为8888)")
 }
 
 func main() {
-	//命令行解析
 	flag.Parse()
 
 	c := NewClient(serverIp, serverPort)
@@ -188,11 +311,6 @@ func main() {
 		return
 	}
 
-	//单独开启一个goroutine处理server的回执消息
-	go c.DealResponse()
-
 	fmt.Println(">>>>>连接服务器成功...")
-
-	//启动客户端业务
 	c.Run()
 }

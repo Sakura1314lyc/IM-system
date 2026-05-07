@@ -58,18 +58,23 @@
 - ✅ Web UI 基于 WebSocket 双向实时通信
 - ✅ 头像支持 emoji 和图片上传（文件存储）
 - ✅ 会话 Token 自动过期 + 后台定期清理
-- ✅ 登录/注册/消息发送速率限制（基于 IP）
-- ✅ 服务端空闲超时踢出
-- ✅ 输入安全过滤（防 XSS + 长度截断）
+- ✅ 登录/注册/消息发送速率限制（基于 IP + TCP 独立限流）
+- ✅ 服务端空闲超时踢出 + TCP Keep-Alive 心跳保活
+- ✅ 输入安全过滤（防 XSS + 长度截断 + 用户名字符校验）
 - ✅ 可选 TLS 加密（自动生成 ECDSA 自签名证书）
 - ✅ 端口被占用时自动回退
 - ✅ 优雅关闭（SIGINT/SIGTERM 信号处理）
 - ✅ IPv6 兼容
 - ✅ 多环境配置管理（dev/prod/test JSON + 环境变量覆盖）
 - ✅ 接口化存储层（`Storage` 接口，方便测试与替换）
+- ✅ 统一消息广播层（消除 `BroadCast`/`BroadCastFromWeb`/`BroadCastFromWS` 代码重复）
 - ✅ 结构化日志（`log/slog`，支持 JSON 输出）
 - ✅ CORS 跨域支持
-- ✅ WebSocket 自动重连（指数退避）
+- ✅ WebSocket 自动重连（指数退避 + 随机抖动）
+- ✅ 运行指标端点（`/api/metrics`，内存/goroutine/在线数）
+- ✅ pprof 性能分析端点（`/debug/pprof/`）
+- ✅ SQLite WAL 模式（并发读写性能优化）
+- ✅ 消息历史游标分页（`before` 参数）
 - ✅ 离线消息处理（消息存入数据库，上线后加载）
 - ✅ Redis 会话存储（水平扩展，多实例共享会话）
 - ✅ Redis 消息总线（Pub/Sub 跨服务器消息分发）
@@ -196,7 +201,7 @@ login|alice|123456
 | GET | `/api/ws` | WebSocket 实时消息（先建立连接，再发送 JSON 认证） |
 | GET | `/api/online` | 在线用户（无需认证） |
 | POST | `/api/send` | 发送消息（公聊/私聊/群聊） |
-| GET | `/api/history` | 历史消息查询 |
+| GET | `/api/history` | 历史消息查询（支持 `before` 游标分页）|
 | GET | `/api/groups` | 我的群组列表 |
 | POST | `/api/group` | 群组操作（create/join/leave/invite） |
 | GET | `/api/friends` | 好友列表 |
@@ -205,6 +210,8 @@ login|alice|123456
 | POST | `/api/profile` | 更新个人资料 |
 | POST | `/api/avatar` | 更新头像 |
 | POST | `/api/rename` | 修改昵称 |
+| GET | `/api/metrics` | 运行指标（内存、goroutine 数、在线用户）|
+| GET | `/debug/pprof/` | pprof 性能分析 |
 
 ## 架构要点
 
@@ -265,6 +272,22 @@ go test ./... -v -count=1 -timeout 60s
 - **内存 SQLite**：数据库测试使用 `:memory:` 模式，互相隔离无污染
 - **并发安全验证**：限流器 goroutine 并发测试、数据库并发读验证
 - **边界值覆盖**：用户名/密码长度边界、消息截断、Session 过期
+
+### 2026-05-07
+
+- **安全**：TCP 协议端登录/注册添加独立速率限制器，防止暴力破解
+- **安全**：用户名添加字符集校验（仅允许字母、数字、中文和下划线），HTTP 和 TCP 入口统一验证
+- **安全**：HTTP 注册添加密码长度前置校验，提升用户体验
+- **重构**：将 `BroadCast` / `BroadCastFromWeb` / `BroadCastFromWS` 统一为 `broadcastPublic()` 内部方法
+- **重构**：将 `BroadCastToGroup` / `BroadCastToGroupWS` 统一为 `broadcastToGroup()` 内部方法
+- **重构**：将 `SendPrivate` / `SendPrivateWS` 统一为 `sendPrivate()` 内部方法
+- **重构**：抽取 `deliverToGroupMembersWS`、`deliverToGroupMembersTCP`、`deliverPrivateWS`、`deliverPrivateTCP` 等细粒度分发方法
+- **功能**：TCP CLI 客户端新增登录/注册/群聊支持，连接后先认证再进入主菜单
+- **功能**：TCP 连接启用 Keep-Alive 心跳（30s 间隔），检测断线更及时
+- **性能**：SQLite 启用 WAL 模式 + busy_timeout，提升并发读写性能
+- **性能**：消息历史 API 支持 `before` 游标分页参数，避免一次性加载过多数据
+- **可观测**：新增 `/api/metrics` 端点，返回 goroutine 数、在线用户、内存占用等运行指标
+- **可观测**：注册 `/debug/pprof/` 性能分析端点，方便排查性能瓶颈
 
 ## License
 

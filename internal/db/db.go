@@ -30,6 +30,11 @@ func InitDatabase(dbPath string) (*Database, error) {
 
 	database := &Database{db: db}
 
+	// Enable WAL mode for better concurrent read/write performance
+	db.Exec("PRAGMA journal_mode=WAL")
+	db.Exec("PRAGMA busy_timeout=5000")
+	db.Exec("PRAGMA foreign_keys=ON")
+
 	if err := database.createTables(); err != nil {
 		return nil, fmt.Errorf("failed to create tables: %v", err)
 	}
@@ -388,14 +393,21 @@ func (d *Database) UpdateUserProfile(username, gender, signature string) error {
 	return nil
 }
 
-func (d *Database) GetPublicMessages(limit int) ([]*model.DBMessageExt, error) {
-	rows, err := d.db.Query(`
+func (d *Database) GetPublicMessages(limit int, beforeID int) ([]*model.DBMessageExt, error) {
+	query := `
 		SELECT m.id, u.username, u.avatar, u.signature, '', '', m.content, m.type, m.created_at
 		FROM messages m
 		JOIN users u ON m.from_id = u.id
-		WHERE m.type = 'public'
-		ORDER BY m.created_at DESC
-		LIMIT ?`, limit)
+		WHERE m.type = 'public'`
+	args := make([]any, 0)
+	if beforeID > 0 {
+		query += ` AND m.id < ?`
+		args = append(args, beforeID)
+	}
+	query += ` ORDER BY m.created_at DESC LIMIT ?`
+	args = append(args, limit)
+
+	rows, err := d.db.Query(query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("database error: %v", err)
 	}
@@ -413,15 +425,22 @@ func (d *Database) GetPublicMessages(limit int) ([]*model.DBMessageExt, error) {
 	return messages, nil
 }
 
-func (d *Database) GetGroupMessages(groupName string, limit int) ([]*model.DBMessageExt, error) {
-	rows, err := d.db.Query(`
+func (d *Database) GetGroupMessages(groupName string, limit int, beforeID int) ([]*model.DBMessageExt, error) {
+	query := `
 		SELECT m.id, u.username, u.avatar, u.signature, '', g.name, m.content, m.type, m.created_at
 		FROM messages m
 		JOIN users u ON m.from_id = u.id
 		JOIN groups g ON m.group_id = g.id
-		WHERE m.type = 'group' AND g.name = ?
-		ORDER BY m.created_at DESC
-		LIMIT ?`, groupName, limit)
+		WHERE m.type = 'group' AND g.name = ?`
+	args := []any{groupName}
+	if beforeID > 0 {
+		query += ` AND m.id < ?`
+		args = append(args, beforeID)
+	}
+	query += ` ORDER BY m.created_at DESC LIMIT ?`
+	args = append(args, limit)
+
+	rows, err := d.db.Query(query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("database error: %v", err)
 	}
@@ -439,15 +458,22 @@ func (d *Database) GetGroupMessages(groupName string, limit int) ([]*model.DBMes
 	return messages, nil
 }
 
-func (d *Database) GetPrivateMessages(username, peer string, limit int) ([]*model.DBMessageExt, error) {
-	rows, err := d.db.Query(`
+func (d *Database) GetPrivateMessages(username, peer string, limit int, beforeID int) ([]*model.DBMessageExt, error) {
+	query := `
 		SELECT m.id, u.username, u.avatar, u.signature, u2.username, '', m.content, m.type, m.created_at
 		FROM messages m
 		JOIN users u ON m.from_id = u.id
 		JOIN users u2 ON m.to_id = u2.id
-		WHERE m.type = 'private' AND ((u.username = ? AND u2.username = ?) OR (u.username = ? AND u2.username = ?))
-		ORDER BY m.created_at DESC
-		LIMIT ?`, username, peer, peer, username, limit)
+		WHERE m.type = 'private' AND ((u.username = ? AND u2.username = ?) OR (u.username = ? AND u2.username = ?))`
+	args := []any{username, peer, peer, username}
+	if beforeID > 0 {
+		query += ` AND m.id < ?`
+		args = append(args, beforeID)
+	}
+	query += ` ORDER BY m.created_at DESC LIMIT ?`
+	args = append(args, limit)
+
+	rows, err := d.db.Query(query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("database error: %v", err)
 	}
