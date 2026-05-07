@@ -635,6 +635,38 @@ func (d *Database) GetFriends(userID int) ([]*model.UserPublic, error) {
 	return friends, nil
 }
 
+func (d *Database) SearchMessages(query string, limit int) ([]*model.DBMessageExt, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	searchPattern := "%" + query + "%"
+	rows, err := d.db.Query(`
+		SELECT m.id, u.username, u.avatar, u.signature,
+		       COALESCE(u2.username, ''), COALESCE(g.name, ''),
+		       m.content, m.type, m.created_at
+		FROM messages m
+		JOIN users u ON m.from_id = u.id
+		LEFT JOIN users u2 ON m.to_id = u2.id
+		LEFT JOIN groups g ON m.group_id = g.id
+		WHERE m.content LIKE ?
+		ORDER BY m.created_at DESC LIMIT ?`, searchPattern, limit)
+	if err != nil {
+		return nil, fmt.Errorf("database error: %v", err)
+	}
+	defer rows.Close()
+
+	var messages []*model.DBMessageExt
+	for rows.Next() {
+		var msg model.DBMessageExt
+		if err := rows.Scan(&msg.ID, &msg.From, &msg.Avatar, &msg.Signature, &msg.To, &msg.Group, &msg.Content, &msg.Type, &msg.CreatedAt); err != nil {
+			return nil, fmt.Errorf("failed to scan message: %v", err)
+		}
+		messages = append(messages, &msg)
+	}
+
+	return messages, nil
+}
+
 // 检查是否是好友
 func (d *Database) IsFriend(userID int, friendID int) (bool, error) {
 	var exists int

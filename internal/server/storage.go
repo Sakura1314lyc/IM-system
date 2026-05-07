@@ -14,6 +14,7 @@ type Storage interface {
 	GetPublicMessages(limit int, beforeID int) ([]*model.DBMessageExt, error)
 	GetGroupMessages(groupName string, limit int, beforeID int) ([]*model.DBMessageExt, error)
 	GetPrivateMessages(username, peer string, limit int, beforeID int) ([]*model.DBMessageExt, error)
+	SearchMessages(query string, limit int) ([]*model.DBMessageExt, error)
 
 	CreateGroup(name string, creatorID int, description string) (*model.DBGroup, error)
 	JoinGroup(groupName string, userID int) error

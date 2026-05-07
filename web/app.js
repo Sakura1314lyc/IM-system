@@ -125,7 +125,9 @@ const state = {
   uploadedAvatar: '',
   ws: null,
   wsReconnectTimer: null,
-  wsRetries: 0
+  wsRetries: 0,
+  searchActive: false,
+  searchKeyword: ''
 };
 
 function escapeHtml(value) {
@@ -785,6 +787,37 @@ async function loadHistory(type = state.mode, target = '') {
   });
 }
 
+let lastSearchHistory = null;
+
+async function searchMessages(q) {
+  if (!state.token) return;
+  const data = await api(`/api/search?q=${encodeURIComponent(q)}&limit=50`);
+  const results = data.results || [];
+  lastSearchHistory = { mode: state.mode, peer: state.selectedPeer, group: DOM.toGroup.value.trim() };
+  resetMessages(`搜索结果：${q}`, `共找到 ${results.length} 条相关消息。按 ESC 或清空搜索框后按 ESC 恢复`);
+  state.searchActive = true;
+  state.searchKeyword = q;
+  if (results.length === 0) return;
+  results.reverse().forEach((item) => {
+    const mine = item.from === state.username;
+    addMessage({
+      text: item.content,
+      type: mine ? 'outgoing' : 'incoming',
+      avatar: mine ? state.avatar : (item.avatar || item.from),
+      time: nowLabel(item.created_at),
+      sender: `${item.from} (${item.type === 'private' ? '私聊' : item.type === 'group' ? item.group : '公聊'})`
+    });
+  });
+}
+
+async function restoreMessages() {
+  if (!state.searchActive) return;
+  state.searchActive = false;
+  state.searchKeyword = '';
+  lastSearchHistory = null;
+  await loadHistory(state.mode, state.mode === 'private' ? state.selectedPeer : state.mode === 'group' ? DOM.toGroup.value.trim() : '');
+}
+
 async function login() {
   const username = DOM.username.value.trim();
   const password = DOM.password.value.trim();
@@ -973,7 +1006,8 @@ async function logout() {
     selectedPeer: '', selectedPeerAvatar: 'L',
     groups: [], friends: [], onlineUsers: [], messages: 0,
     uploadedAvatar: null, gender: '', signature: '',
-    thoughts: [], wsReconnectTimer: null, wsRetries: 0
+    thoughts: [], wsReconnectTimer: null, wsRetries: 0,
+    searchActive: false, searchKeyword: ''
   });
   showLogin();
 }
@@ -1135,6 +1169,19 @@ function bindEvents() {
   }));
 
   DOM.globalSearchInput.addEventListener('input', () => applySearchFilter());
+  DOM.globalSearchInput.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      event.preventDefault();
+      const q = DOM.globalSearchInput.value.trim();
+      if (!q) return;
+      searchMessages(q).catch((err) => toast(err.message, 'error'));
+    }
+    if (event.key === 'Escape') {
+      DOM.globalSearchInput.value = '';
+      applySearchFilter();
+      restoreMessages().catch((err) => toast(err.message, 'error'));
+    }
+  });
   DOM.toUser.addEventListener('input', updateChatTitle);
   DOM.toGroup.addEventListener('input', () => {
     DOM.inviteGroupName.value = DOM.toGroup.value.trim();

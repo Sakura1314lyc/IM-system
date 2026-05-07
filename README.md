@@ -209,6 +209,7 @@ login|alice|123456
 | GET | `/api/profile` | 查看个人资料 |
 | POST | `/api/profile` | 更新个人资料 |
 | POST | `/api/avatar` | 更新头像 |
+| GET | `/api/search` | 消息搜索（`?q=关键词&limit=N`）|
 | POST | `/api/rename` | 修改昵称 |
 | GET | `/api/metrics` | 运行指标（内存、goroutine 数、在线用户）|
 | GET | `/debug/pprof/` | pprof 性能分析 |
@@ -288,6 +289,10 @@ go test ./... -v -count=1 -timeout 60s
 - **性能**：消息历史 API 支持 `before` 游标分页参数，避免一次性加载过多数据
 - **可观测**：新增 `/api/metrics` 端点，返回 goroutine 数、在线用户、内存占用等运行指标
 - **可观测**：注册 `/debug/pprof/` 性能分析端点，方便排查性能瓶颈
+- **功能**：新增 `/api/search` 消息搜索 API，支持按内容关键词搜索历史消息（公聊/私聊/群聊）
+- **功能**：Web UI 消息搜索，在搜索框按 Enter 键搜索历史消息，ESC 恢复
+- **重构**：HTTP handler 统一使用 `requireMethod` 中间件，消除重复方法校验代码
+- **重构**：Web UI 路由注册统一使用 `requireMethod` 中间件，简化 handler 实现
 
 ## License
 

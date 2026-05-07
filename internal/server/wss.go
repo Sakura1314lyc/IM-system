@@ -14,13 +14,14 @@ import (
 
 // WSClient represents a connected WebSocket client.
 type WSClient struct {
-	Name   string
-	Conn   *websocket.Conn
-	Avatar string
-	C      chan string
-	ctx    context.Context
-	cancel context.CancelFunc
-	mu     sync.Mutex
+	Name      string
+	Conn      *websocket.Conn
+	Avatar    string
+	RemoteIP  string
+	C         chan string
+	ctx       context.Context
+	cancel    context.CancelFunc
+	mu        sync.Mutex
 }
 
 type wsIncoming struct {
@@ -88,9 +89,10 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	ctx, cancel := context.WithCancel(r.Context())
 	client := &WSClient{
-		Name:   username,
-		Conn:   conn,
-		Avatar: userInfo.Avatar,
+		Name:      username,
+		Conn:      conn,
+		Avatar:    userInfo.Avatar,
+			RemoteIP:  s.getClientIP(r),
 		C:      make(chan string, 100),
 		ctx:    ctx,
 		cancel: cancel,
@@ -146,6 +148,10 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleWSMessage(client *WSClient, data *wsIncoming) {
+	if !s.sendLimiter.Allow(client.RemoteIP) {
+		s.writeWS(client, wsOutgoing{Type: "error", Content: "消息发送过于频繁，请稍后再试"})
+		return
+	}
 	content := strings.TrimSpace(data.Message)
 	if content == "" {
 		return

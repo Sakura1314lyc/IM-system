@@ -11,6 +11,8 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
+
+	"IM-system/internal/model"
 	"math/big"
 	"net"
 	"net/http"
@@ -64,6 +66,16 @@ func getTokenFromRequest(r *http.Request) string {
 	return strings.TrimSpace(r.URL.Query().Get("token"))
 }
 
+func requireMethod(method string, next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != method {
+			http.Error(w, "只支持 "+method, http.StatusMethodNotAllowed)
+			return
+		}
+		next(w, r)
+	}
+}
+
 func decodeJSONBody(w http.ResponseWriter, r *http.Request, dst any) error {
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1MB
 	return json.NewDecoder(r.Body).Decode(dst)
@@ -103,31 +115,32 @@ func (s *Server) StartWeb() {
 	mux := http.NewServeMux()
 	mux.Handle("/", http.FileServer(http.Dir("./web")))
 	mux.Handle("/uploads/", http.StripPrefix("/uploads/", http.FileServer(http.Dir(s.uploadDir))))
-	mux.HandleFunc("/api/login", s.handleLogin)
-	mux.HandleFunc("/api/logout", s.handleLogout)
+	mux.HandleFunc("/api/login", requireMethod(http.MethodPost, s.handleLogin))
+	mux.HandleFunc("/api/logout", requireMethod(http.MethodPost, s.handleLogout))
 	mux.HandleFunc("/api/ws", s.handleWebSocket)
-	mux.HandleFunc("/api/online", s.handleOnline)
-	mux.HandleFunc("/api/send", s.handleSend)
-	mux.HandleFunc("/api/rename", s.handleRename)
-	mux.HandleFunc("/api/register", s.handleRegister)
-	mux.HandleFunc("/api/avatar", s.handleAvatar)
+	mux.HandleFunc("/api/online", requireMethod(http.MethodGet, s.handleOnline))
+	mux.HandleFunc("/api/send", requireMethod(http.MethodPost, s.handleSend))
+	mux.HandleFunc("/api/rename", requireMethod(http.MethodPost, s.handleRename))
+	mux.HandleFunc("/api/register", requireMethod(http.MethodPost, s.handleRegister))
+	mux.HandleFunc("/api/avatar", requireMethod(http.MethodPost, s.handleAvatar))
 	mux.HandleFunc("/api/lchat/meta", s.handleLchatMeta)
 	mux.HandleFunc("/api/stickers", s.handleStickers)
-	mux.HandleFunc("/api/group", s.handleGroup)
+	mux.HandleFunc("/api/group", requireMethod(http.MethodPost, s.handleGroup))
 	mux.HandleFunc("/api/groups", s.authQueryMiddleware(s.handleGroups))
 	mux.HandleFunc("/api/profile", s.handleProfile)
 	mux.HandleFunc("/api/history", s.authQueryMiddleware(s.handleHistory))
-	mux.HandleFunc("/api/friend", s.handleFriend)
+	mux.HandleFunc("/api/friend", requireMethod(http.MethodPost, s.handleFriend))
 	mux.HandleFunc("/api/friends", s.authQueryMiddleware(s.handleFriends))
 	mux.HandleFunc("/api/check-friend", s.authQueryMiddleware(s.handleCheckFriend))
-		mux.HandleFunc("/api/metrics", s.handleMetrics)
+	mux.HandleFunc("/api/metrics", requireMethod(http.MethodGet, s.handleMetrics))
+	mux.HandleFunc("/api/search", requireMethod(http.MethodGet, s.handleSearch))
 
-		// pprof endpoints for runtime profiling
-		mux.HandleFunc("/debug/pprof/", pprof.Index)
-		mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
-		mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
-		mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
-		mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
+	// pprof endpoints for runtime profiling
+	mux.HandleFunc("/debug/pprof/", pprof.Index)
+	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
 
 	listener, finalAddr, err := listenWithFallback(addr, 20)
 	if err != nil {
@@ -146,11 +159,6 @@ func (s *Server) StartWeb() {
 }
 
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "只支持 POST", http.StatusMethodNotAllowed)
-		return
-	}
-
 	if !s.loginLimiter.Allow(s.getClientIP(r)) {
 		http.Error(w, "请求过于频繁，请稍后再试", http.StatusTooManyRequests)
 		return
@@ -196,11 +204,6 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleLogout(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "只支持 POST", http.StatusMethodNotAllowed)
-		return
-	}
-
 	var data struct {
 		Token string `json:"token"`
 	}
@@ -229,11 +232,6 @@ func (s *Server) handleOnline(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSend(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "只支持 POST", http.StatusMethodNotAllowed)
-		return
-	}
-
 	if !s.sendLimiter.Allow(s.getClientIP(r)) {
 		http.Error(w, "消息发送过于频繁，请稍后再试", http.StatusTooManyRequests)
 		return
@@ -387,11 +385,6 @@ func (s *Server) handleProfile(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleAvatar(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "只支持 POST", http.StatusMethodNotAllowed)
-		return
-	}
-
 	var data struct {
 		Token  string `json:"token"`
 		Avatar string `json:"avatar"`
@@ -423,10 +416,6 @@ func (s *Server) handleAvatar(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "只支持 GET", http.StatusMethodNotAllowed)
-		return
-	}
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
 
@@ -450,6 +439,34 @@ func (s *Server) handleMetrics(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+
+func (s *Server) handleSearch(w http.ResponseWriter, r *http.Request) {
+	query := strings.TrimSpace(r.URL.Query().Get("q"))
+	if query == "" {
+		http.Error(w, "缺少搜索关键词", http.StatusBadRequest)
+		return
+	}
+
+	limit := 50
+	if rawLimit := strings.TrimSpace(r.URL.Query().Get("limit")); rawLimit != "" {
+		if parsedLimit, parseErr := strconv.Atoi(rawLimit); parseErr == nil && parsedLimit > 0 {
+			limit = min(parsedLimit, 100)
+		}
+	}
+
+	results, err := s.DB.SearchMessages(query, limit)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if results == nil {
+		results = []*model.DBMessageExt{}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]any{"results": results})
+}
 
 func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
@@ -506,11 +523,6 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleRename(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "只支持 POST", http.StatusMethodNotAllowed)
-		return
-	}
-
 	var data struct {
 		Token string `json:"token"`
 		New   string `json:"new"`
@@ -546,11 +558,6 @@ func (s *Server) handleRename(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "只支持 POST", http.StatusMethodNotAllowed)
-		return
-	}
-
 	if !s.registerLimiter.Allow(s.getClientIP(r)) {
 		http.Error(w, "请求过于频繁，请稍后再试", http.StatusTooManyRequests)
 		return
@@ -588,11 +595,6 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleGroup(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "只支持 POST", http.StatusMethodNotAllowed)
-		return
-	}
-
 	var data struct {
 		Token      string `json:"token"`
 		Action     string `json:"action"`
@@ -701,11 +703,6 @@ func (s *Server) handleGroups(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleFriend(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "只支持 POST", http.StatusMethodNotAllowed)
-		return
-	}
-
 	var data struct {
 		Token      string `json:"token"`
 		Action     string `json:"action"`

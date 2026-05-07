@@ -50,7 +50,7 @@ func (u *User) Online() {
 
 	slog.Debug("user online", "name", u.Name, "addr", u.Addr)
 
-	u.Server.BroadCast(u, "已上线")
+	u.Server.BroadCast(u, sysOnline)
 }
 
 func (u *User) SendMsg(msg string) {
@@ -251,7 +251,7 @@ func (u *User) Offline() {
 	}
 	u.Server.mapLock.Unlock()
 
-	u.Server.BroadCast(u, "已下线")
+	u.Server.BroadCast(u, sysOffline)
 
 	if u.conn != nil {
 		u.conn.Close()

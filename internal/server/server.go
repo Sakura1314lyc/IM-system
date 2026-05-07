@@ -21,6 +21,20 @@ import (
 
 var htmlTagRe = regexp.MustCompile(`<[^>]*>`)
 
+// System message constants
+const (
+	sysOnline  = "已上线"
+	sysOffline = "已下线"
+)
+
+// Message type constants
+const (
+	msgPublic  = "public"
+	msgPrivate = "private"
+	msgGroup   = "group"
+	msgSystem  = "system"
+)
+
 type Server struct {
 	Ip   string
 	Port int
@@ -283,7 +297,7 @@ func (s *Server) broadcastPublic(name, msg, avatar string, isSystem bool) {
 }
 
 func (s *Server) BroadCast(user *User, msg string) {
-	isSystem := msg == "已上线" || msg == "已下线"
+	isSystem := msg == sysOnline || msg == sysOffline
 	if isSystem {
 		s.broadcastPublic(user.Name, msg, user.Avatar, true)
 	} else {

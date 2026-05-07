@@ -117,6 +117,10 @@ func (m *mockStorage) GetPrivateMessages(username, peer string, limit int, befor
 	return nil, nil
 }
 
+func (m *mockStorage) SearchMessages(query string, limit int) ([]*model.DBMessageExt, error) {
+	return nil, nil
+}
+
 func (m *mockStorage) CreateGroup(name string, creatorID int, description string) (*model.DBGroup, error) {
 	if _, ok := m.groups[name]; ok {
 		return nil, fmt.Errorf("group already exists")
@@ -228,22 +232,22 @@ func newTestHTTPHarness(t *testing.T) *testHTTPHarness {
 
 	// Use a real mux for testing
 	mux := http.NewServeMux()
-	mux.HandleFunc("/api/login", s.handleLogin)
-	mux.HandleFunc("/api/logout", s.handleLogout)
-	mux.HandleFunc("/api/online", s.handleOnline)
-	mux.HandleFunc("/api/register", s.handleRegister)
-	mux.HandleFunc("/api/avatar", s.handleAvatar)
+	mux.HandleFunc("/api/login", requireMethod(http.MethodPost, s.handleLogin))
+	mux.HandleFunc("/api/logout", requireMethod(http.MethodPost, s.handleLogout))
+	mux.HandleFunc("/api/online", requireMethod(http.MethodGet, s.handleOnline))
+	mux.HandleFunc("/api/register", requireMethod(http.MethodPost, s.handleRegister))
+	mux.HandleFunc("/api/avatar", requireMethod(http.MethodPost, s.handleAvatar))
 	mux.HandleFunc("/api/lchat/meta", s.handleLchatMeta)
 	mux.HandleFunc("/api/stickers", s.handleStickers)
 	mux.HandleFunc("/api/profile", s.handleProfile)
-	mux.HandleFunc("/api/rename", s.handleRename)
+	mux.HandleFunc("/api/rename", requireMethod(http.MethodPost, s.handleRename))
 	mux.HandleFunc("/api/history", s.authQueryMiddleware(s.handleHistory))
-	mux.HandleFunc("/api/group", s.handleGroup)
+	mux.HandleFunc("/api/group", requireMethod(http.MethodPost, s.handleGroup))
 	mux.HandleFunc("/api/groups", s.authQueryMiddleware(s.handleGroups))
-	mux.HandleFunc("/api/friend", s.handleFriend)
+	mux.HandleFunc("/api/friend", requireMethod(http.MethodPost, s.handleFriend))
 	mux.HandleFunc("/api/friends", s.authQueryMiddleware(s.handleFriends))
 	mux.HandleFunc("/api/check-friend", s.authQueryMiddleware(s.handleCheckFriend))
-	mux.HandleFunc("/api/send", s.handleSend)
+	mux.HandleFunc("/api/send", requireMethod(http.MethodPost, s.handleSend))
 
 	httpServer := httptest.NewServer(mux)
 
